@@ -34,7 +34,6 @@ from pdfplumber import PDF
 
 # OpenAI Vision
 import openai
-from openai import OpenAI
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -76,7 +75,7 @@ class AdvancedImageProcessor:
     """Advanced image processing with OCR and AI vision"""
     
     def __init__(self, openai_api_key: str):
-        self.openai_client = OpenAI(api_key=openai_api_key)
+        openai.api_key = openai_api_key
         
         # Configure Tesseract (adjust path as needed)
         # pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract'
@@ -190,7 +189,7 @@ class AdvancedImageProcessor:
             # Encode image to base64
             base64_image = base64.b64encode(image_data).decode('utf-8')
             
-            response = self.openai_client.chat.completions.create(
+            response = openai.ChatCompletion.create(
                 model="gpt-4-vision-preview",
                 messages=[
                     {
@@ -328,7 +327,7 @@ class ChartAnalyzer:
     """Analyze charts and technical drawings"""
     
     def __init__(self, openai_api_key: str):
-        self.openai_client = OpenAI(api_key=openai_api_key)
+        openai.api_key = openai_api_key
     
     def analyze_charts_in_images(self, images: List[ImageContent]) -> List[ChartContent]:
         """Analyze images to identify and extract chart data"""
@@ -360,7 +359,7 @@ class ChartAnalyzer:
         try:
             base64_image = base64.b64encode(image_data).decode('utf-8')
             
-            response = self.openai_client.chat.completions.create(
+            response = openai.ChatCompletion.create(
                 model="gpt-4-vision-preview",
                 messages=[
                     {
