@@ -6,13 +6,74 @@ pandas==2.2.3
 numpy==1.26.4
 scikit-learn==1.5.2
 Pillow==10.4.0
+
+# Advanced RAG and LangChain
 langchain==0.2.6
 langchain-openai==0.1.8
 langchain-community==0.2.6
+langchain-experimental==0.0.62
+langchain-text-splitters==0.2.2
+
+# Vector Stores and Embeddings
 chromadb==0.4.24
+faiss-cpu==1.7.4
 sentence-transformers==2.7.0
+transformers==4.41.2
+torch==2.3.1
+
+# Document Processing
 pypdf==4.2.0
 python-multipart==0.0.9
+unstructured==0.14.10
+pytesseract==0.3.10
+pdf2image==1.17.0
+docx2txt==0.8
+python-pptx==0.6.23
+
+# UI and Visualization
 streamlit-chat==0.1.1
-plotly==5.17.0
 streamlit-option-menu==0.3.12
+streamlit-aggrid==0.3.4.post3
+streamlit-authenticator==0.3.2
+plotly==5.17.0
+altair==5.0.1
+
+# Database and Storage
+sqlalchemy==2.0.21
+sqlite3
+redis==5.0.0
+boto3==1.34.144
+
+# API and Web
+fastapi==0.111.0
+uvicorn==0.30.1
+requests==2.31.0
+httpx==0.27.0
+
+# Monitoring and Analytics
+prometheus-client==0.20.0
+psutil==5.9.8
+memory-profiler==0.61.0
+
+# Testing and Quality
+pytest==8.2.2
+pytest-asyncio==0.23.7
+black==24.4.2
+flake8==7.1.0
+mypy==1.10.1
+
+# Security and Validation
+pydantic==2.7.4
+cryptography==42.0.8
+bcrypt==4.1.3
+
+# Async and Performance
+asyncio
+aiofiles==23.2.1
+celery==5.3.4
+
+# Additional ML/AI
+spacy==3.7.5
+nltk==3.8.1
+textstat==0.7.3
+keybert==0.8.5
