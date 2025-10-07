@@ -6,19 +6,18 @@ from pathlib import Path
 
 # RAG imports
 try:
-    from langchain.document_loaders import PyPDFLoader
+    from langchain_community.document_loaders import PyPDFLoader
     from langchain.text_splitter import RecursiveCharacterTextSplitter
-    from langchain.embeddings import OpenAIEmbeddings
-    from langchain.chat_models import ChatOpenAI
+    from langchain_openai import OpenAIEmbeddings, ChatOpenAI
     RAG_AVAILABLE = True
     
     # Try to import vector store
     try:
-        from langchain.vectorstores import Chroma
+        from langchain_community.vectorstores import Chroma
         VECTOR_STORE_AVAILABLE = True
     except ImportError:
         try:
-            from langchain.vectorstores import FAISS
+            from langchain_community.vectorstores import FAISS
             VECTOR_STORE_AVAILABLE = True
         except ImportError:
             VECTOR_STORE_AVAILABLE = False
@@ -207,14 +206,14 @@ def process_pdfs(uploaded_files, api_key):
                     
                     # Try Chroma first, then FAISS
                     try:
-                        from langchain.vectorstores import Chroma
+                        from langchain_community.vectorstores import Chroma
                         vectorstore = Chroma.from_documents(
                             documents=chunks,
                             embedding=embeddings,
                             persist_directory="./chroma_db"
                         )
                     except:
-                        from langchain.vectorstores import FAISS
+                        from langchain_community.vectorstores import FAISS
                         vectorstore = FAISS.from_documents(chunks, embeddings)
                     
                     # Create conversation chain
