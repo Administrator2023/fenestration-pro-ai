@@ -33,6 +33,23 @@ st.set_page_config(
     layout="wide"
 )
 
+# Initialize session state variables early to prevent AttributeError
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": "🚀 Welcome to Fenestration Pro AI - State-of-the-Art Edition! I'm here to help answer your questions about windows, doors, and building envelope systems. Upload a PDF, click 'Process & Learn from PDFs', and I'll give you specific answers from YOUR documents!"
+    })
+
+if "vectorstore" not in st.session_state:
+    st.session_state.vectorstore = None
+
+if "conversation_chain" not in st.session_state:
+    st.session_state.conversation_chain = None
+
+if "processed_docs" not in st.session_state:
+    st.session_state.processed_docs = []
+
 # Custom CSS
 st.markdown("""
 <style>
@@ -137,22 +154,7 @@ with st.sidebar:
     st.metric("Total Queries", len(st.session_state.get('messages', [])) // 2)
     st.metric("Knowledge Base", "Active" if st.session_state.conversation_chain else "Inactive")
 
-# Initialize session state
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": "🚀 Welcome to Fenestration Pro AI - State-of-the-Art Edition! I'm here to help answer your questions about windows, doors, and building envelope systems. Upload a PDF, click 'Process & Learn from PDFs', and I'll give you specific answers from YOUR documents!"
-    })
-
-if "vectorstore" not in st.session_state:
-    st.session_state.vectorstore = None
-
-if "conversation_chain" not in st.session_state:
-    st.session_state.conversation_chain = None
-
-if "processed_docs" not in st.session_state:
-    st.session_state.processed_docs = []
+# Session state already initialized at the beginning of the app
 
 def process_pdfs(uploaded_files, api_key):
     """Process PDF files and extract content"""
