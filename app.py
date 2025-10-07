@@ -302,13 +302,13 @@ if prompt := st.chat_input("Ask about fenestration, windows, doors, or upload a 
                 
                 elif st.session_state.conversation_chain == "basic" and hasattr(st.session_state, 'document_content'):
                     # Use basic text processing with document content
-                    import openai
-                    openai.api_key = api_key
+                    from openai import OpenAI
+                    client = OpenAI(api_key=api_key)
                     
                     # Include document content in the prompt
                     document_context = st.session_state.document_content[:8000]  # Limit context size
                     
-                    response = openai.ChatCompletion.create(
+                    response = client.chat.completions.create(
                         model="gpt-3.5-turbo",
                         messages=[
                             {"role": "system", "content": "You are an expert in fenestration, windows, doors, glazing systems, and building envelope. Answer questions based on the provided document content. Be specific and cite information from the documents."},
@@ -318,7 +318,7 @@ if prompt := st.chat_input("Ask about fenestration, windows, doors, or upload a 
                         max_tokens=800
                     )
                     
-                    assistant_response = response.choices[0].message['content']
+                    assistant_response = response.choices[0].message.content
                     assistant_response += "\n\n📄 *This answer is based on your uploaded documents.*"
                 
                 else:
