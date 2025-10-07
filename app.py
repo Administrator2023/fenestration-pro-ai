@@ -4,7 +4,10 @@ import tempfile
 import shutil
 from pathlib import Path
 
-# RAG imports
+# RAG imports - all optional
+RAG_AVAILABLE = False
+VECTOR_STORE_AVAILABLE = False
+
 try:
     from langchain.document_loaders import PyPDFLoader
     from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -24,8 +27,15 @@ try:
             VECTOR_STORE_AVAILABLE = False
             
 except ImportError:
-    RAG_AVAILABLE = False
-    VECTOR_STORE_AVAILABLE = False
+    # RAG not available - that's OK, we'll use basic mode
+    pass
+
+# Try to import PyPDF2 as fallback
+try:
+    import PyPDF2
+    PYPDF2_AVAILABLE = True
+except ImportError:
+    PYPDF2_AVAILABLE = False
 
 st.set_page_config(
     page_title="Fenestration Pro AI",
@@ -172,18 +182,43 @@ def process_pdfs(uploaded_files, api_key):
                 with open(temp_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
                 
-                # Load PDF
-                loader = PyPDFLoader(temp_path)
-                documents = loader.load()
+                doc_text = ""
+                chunks_count = 0
                 
-                # Extract text content
-                doc_text = "\n".join([doc.page_content for doc in documents])
+                # Try different PDF processing methods
+                if RAG_AVAILABLE:
+                    try:
+                        # Use PyPDFLoader if available
+                        loader = PyPDFLoader(temp_path)
+                        documents = loader.load()
+                        doc_text = "\n".join([doc.page_content for doc in documents])
+                        chunks_count = len(documents)
+                    except Exception as e:
+                        st.warning(f"PyPDFLoader failed, trying fallback: {str(e)}")
+                
+                # Fallback to PyPDF2 if needed
+                if not doc_text and PYPDF2_AVAILABLE:
+                    try:
+                        with open(temp_path, 'rb') as file:
+                            pdf_reader = PyPDF2.PdfReader(file)
+                            for page_num in range(len(pdf_reader.pages)):
+                                page = pdf_reader.pages[page_num]
+                                doc_text += page.extract_text() + "\n"
+                            chunks_count = len(pdf_reader.pages)
+                    except Exception as e:
+                        st.warning(f"PyPDF2 failed: {str(e)}")
+                
+                # If still no text, show error
+                if not doc_text:
+                    st.error(f"Could not extract text from {uploaded_file.name}")
+                    continue
+                
                 all_text += f"\n\n--- FROM {uploaded_file.name} ---\n{doc_text}"
                 
                 # Track processed document
                 processed_docs.append({
                     'name': uploaded_file.name,
-                    'chunks': len(documents),
+                    'chunks': chunks_count,
                     'content': doc_text
                 })
             
@@ -323,26 +358,30 @@ if prompt := st.chat_input("Ask about fenestration, windows, doors, or upload a 
                 
                 else:
                     # Fallback to regular OpenAI API
-                    import openai
-                    openai.api_key = api_key
-                    
-                    # Include context about uploaded files
-                    context = ""
-                    if st.session_state.processed_docs:
-                        doc_names = [doc['name'] for doc in st.session_state.processed_docs]
-                        context = f"\n\nNote: The user has uploaded these documents: {', '.join(doc_names)}. However, I cannot access their content directly. Please process the documents first using the 'Process & Learn from PDFs' button."
-                    
-                    response = openai.ChatCompletion.create(
-                        model="gpt-3.5-turbo",
-                        messages=[
-                            {"role": "system", "content": "You are an expert in fenestration, windows, doors, glazing systems, and building envelope. Provide detailed, technical answers."},
-                            {"role": "user", "content": prompt + context}
-                        ],
-                        temperature=0.7,
-                        max_tokens=800
-                    )
-                    
-                    assistant_response = response.choices[0].message['content']
+                    try:
+                        from openai import OpenAI
+                        client = OpenAI(api_key=api_key)
+                        
+                        # Include context about uploaded files
+                        context = ""
+                        if st.session_state.processed_docs:
+                            doc_names = [doc['name'] for doc in st.session_state.processed_docs]
+                            context = f"\n\nNote: The user has uploaded these documents: {', '.join(doc_names)}. However, I cannot access their content directly. Please process the documents first using the 'Process & Learn from PDFs' button."
+                        
+                        response = client.chat.completions.create(
+                            model="gpt-3.5-turbo",
+                            messages=[
+                                {"role": "system", "content": "You are an expert in fenestration, windows, doors, glazing systems, and building envelope. Provide detailed, technical answers."},
+                                {"role": "user", "content": prompt + context}
+                            ],
+                            temperature=0.7,
+                            max_tokens=800
+                        )
+                        
+                        assistant_response = response.choices[0].message.content
+                    except Exception as e:
+                        # If new API fails, provide basic response
+                        assistant_response = f"I'm having trouble connecting to the AI service. Error: {str(e)}\n\nPlease make sure your OpenAI API key is valid."
                     
                     # Add helpful message if documents are uploaded but not processed
                     if st.session_state.processed_docs and not st.session_state.conversation_chain:
