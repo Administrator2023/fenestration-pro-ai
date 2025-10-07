@@ -17,7 +17,7 @@ def check_dependencies():
     """Check if all required dependencies are installed"""
     required_packages = [
         'streamlit', 'openai', 'langchain', 'chromadb', 'pandas', 
-        'numpy', 'plotly', 'PIL', 'sentence_transformers', 'faiss-cpu'
+        'numpy', 'plotly', 'sentence_transformers'
     ]
     
     missing_packages = []

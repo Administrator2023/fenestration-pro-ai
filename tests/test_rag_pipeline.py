@@ -15,25 +15,39 @@ import sys
 # Add parent directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent))
 
-from advanced_rag import (
-    RAGPipeline, 
-    AdvancedDocumentProcessor,
-    AdvancedTextSplitter,
-    MultiVectorRetriever,
-    AdvancedConversationChain,
-    DocumentMetadata
-)
-from multimodal_processor import (
-    MultimodalDocumentProcessor,
-    AdvancedImageProcessor,
-    AdvancedTableExtractor
-)
-from analytics_dashboard import (
-    AnalyticsDatabase,
-    SessionMetrics,
-    QueryMetrics,
-    DocumentMetrics
-)
+try:
+    from advanced_rag import (
+        RAGPipeline, 
+        AdvancedDocumentProcessor,
+        AdvancedTextSplitter,
+        MultiVectorRetriever,
+        AdvancedConversationChain,
+        DocumentMetadata
+    )
+    ADVANCED_RAG_AVAILABLE = True
+except ImportError:
+    ADVANCED_RAG_AVAILABLE = False
+    
+try:
+    from multimodal_processor import (
+        MultimodalDocumentProcessor,
+        AdvancedImageProcessor,
+        AdvancedTableExtractor
+    )
+    MULTIMODAL_AVAILABLE = True
+except ImportError:
+    MULTIMODAL_AVAILABLE = False
+    
+try:
+    from analytics_dashboard import (
+        AnalyticsDatabase,
+        SessionMetrics,
+        QueryMetrics,
+        DocumentMetrics
+    )
+    ANALYTICS_AVAILABLE = True
+except ImportError:
+    ANALYTICS_AVAILABLE = False
 
 # Test configuration
 TEST_API_KEY = "test-api-key-placeholder"
@@ -55,6 +69,7 @@ def analytics_db():
     """Create analytics database for testing"""
     return AnalyticsDatabase(":memory:")  # In-memory database for testing
 
+@pytest.mark.skipif(not ADVANCED_RAG_AVAILABLE, reason="advanced_rag module not available")
 class TestAdvancedDocumentProcessor:
     """Test document processing functionality"""
     

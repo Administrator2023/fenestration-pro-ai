@@ -211,8 +211,12 @@ class CacheManager:
     @st.cache_resource
     def load_sentence_transformer(model_name: str):
         """Cache sentence transformer model"""
-        from sentence_transformers import SentenceTransformer
-        return SentenceTransformer(model_name)
+        try:
+            from sentence_transformers import SentenceTransformer
+            return SentenceTransformer(model_name)
+        except ImportError:
+            logger.warning("sentence_transformers not available")
+            return None
     
     @staticmethod
     def clear_cache():
