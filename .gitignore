@@ -1,6 +1,117 @@
-.env
+# Byte-compiled / optimized / DLL files
 __pycache__/
-*.pyc
-.DS_Store
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Environments
+.env
+.venv
+env/
 venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Vector stores and databases
+vector_stores/
+chroma_db/
+*.db
+*.sqlite
+
+# Logs
 *.log
+logs/
+
+# Temporary files
+*.tmp
+temp/
+tmp/
+
+# Model files
+*.pkl
+*.h5
+*.model
+*.pt
+*.pth
+
+# Data files (if large)
+data/
+*.csv
+*.xlsx
+*.xls
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# Mac
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+
+# Linux
+*~
