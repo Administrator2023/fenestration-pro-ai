@@ -288,6 +288,7 @@ def process_pdfs(uploaded_files, api_key):
                 # Basic mode without vector stores
                 st.session_state.conversation_chain = "basic"
                 st.success(f"✅ Successfully processed {len(uploaded_files)} PDFs with basic text extraction!")
+                st.info("📚 I can now answer questions based on your uploaded documents!")
             
             # Cleanup
             shutil.rmtree(temp_dir)
@@ -362,23 +363,41 @@ if prompt := st.chat_input("Ask about fenestration, windows, doors, or upload a 
                         from openai import OpenAI
                         client = OpenAI(api_key=api_key)
                         
-                        # Include context about uploaded files
-                        context = ""
-                        if st.session_state.processed_docs:
-                            doc_names = [doc['name'] for doc in st.session_state.processed_docs]
-                            context = f"\n\nNote: The user has uploaded these documents: {', '.join(doc_names)}. However, I cannot access their content directly. Please process the documents first using the 'Process & Learn from PDFs' button."
-                        
-                        response = client.chat.completions.create(
-                            model="gpt-3.5-turbo",
-                            messages=[
-                                {"role": "system", "content": "You are an expert in fenestration, windows, doors, glazing systems, and building envelope. Provide detailed, technical answers."},
-                                {"role": "user", "content": prompt + context}
-                            ],
-                            temperature=0.7,
-                            max_tokens=800
-                        )
-                        
-                        assistant_response = response.choices[0].message.content
+                        # Check if we have document content even without conversation chain
+                        if hasattr(st.session_state, 'document_content') and st.session_state.document_content:
+                            # Use document content if available
+                            document_context = st.session_state.document_content[:8000]
+                            
+                            response = client.chat.completions.create(
+                                model="gpt-3.5-turbo",
+                                messages=[
+                                    {"role": "system", "content": "You are an expert in fenestration, windows, doors, glazing systems, and building envelope. Answer questions based on the provided document content. Be specific and cite information from the documents."},
+                                    {"role": "user", "content": f"Based on this document content:\n\n{document_context}\n\nQuestion: {prompt}"}
+                                ],
+                                temperature=0.7,
+                                max_tokens=800
+                            )
+                            
+                            assistant_response = response.choices[0].message.content
+                            assistant_response += "\n\n📄 *This answer is based on your uploaded documents.*"
+                        else:
+                            # No documents processed yet
+                            context = ""
+                            if st.session_state.processed_docs:
+                                doc_names = [doc['name'] for doc in st.session_state.processed_docs]
+                                context = f"\n\nNote: The user has uploaded these documents: {', '.join(doc_names)}. However, I cannot access their content directly. Please process the documents first using the 'Process & Learn from PDFs' button."
+                            
+                            response = client.chat.completions.create(
+                                model="gpt-3.5-turbo",
+                                messages=[
+                                    {"role": "system", "content": "You are an expert in fenestration, windows, doors, glazing systems, and building envelope. Provide detailed, technical answers."},
+                                    {"role": "user", "content": prompt + context}
+                                ],
+                                temperature=0.7,
+                                max_tokens=800
+                            )
+                            
+                            assistant_response = response.choices[0].message.content
                     except Exception as e:
                         # If new API fails, provide basic response
                         assistant_response = f"I'm having trouble connecting to the AI service. Error: {str(e)}\n\nPlease make sure your OpenAI API key is valid."
