@@ -9,13 +9,23 @@ try:
     from langchain.document_loaders import PyPDFLoader
     from langchain.text_splitter import RecursiveCharacterTextSplitter
     from langchain.embeddings import OpenAIEmbeddings
-    from langchain.vectorstores import Chroma
-    from langchain.chains import ConversationalRetrievalChain
-    from langchain.memory import ConversationBufferMemory
     from langchain.chat_models import ChatOpenAI
     RAG_AVAILABLE = True
+    
+    # Try to import vector store
+    try:
+        from langchain.vectorstores import Chroma
+        VECTOR_STORE_AVAILABLE = True
+    except ImportError:
+        try:
+            from langchain.vectorstores import FAISS
+            VECTOR_STORE_AVAILABLE = True
+        except ImportError:
+            VECTOR_STORE_AVAILABLE = False
+            
 except ImportError:
     RAG_AVAILABLE = False
+    VECTOR_STORE_AVAILABLE = False
 
 st.set_page_config(
     page_title="Fenestration Pro AI",
@@ -145,12 +155,13 @@ if "processed_docs" not in st.session_state:
     st.session_state.processed_docs = []
 
 def process_pdfs(uploaded_files, api_key):
-    """Process PDF files and create RAG knowledge base"""
-    with st.spinner("🧠 Processing PDFs and building knowledge base..."):
+    """Process PDF files and extract content"""
+    with st.spinner("🧠 Processing PDFs and extracting content..."):
         try:
             # Create temporary directory
             temp_dir = tempfile.mkdtemp()
-            all_documents = []
+            all_text = ""
+            processed_docs = []
             
             # Process each PDF
             for uploaded_file in uploaded_files:
@@ -162,57 +173,87 @@ def process_pdfs(uploaded_files, api_key):
                 # Load PDF
                 loader = PyPDFLoader(temp_path)
                 documents = loader.load()
-                all_documents.extend(documents)
+                
+                # Extract text content
+                doc_text = "\n".join([doc.page_content for doc in documents])
+                all_text += f"\n\n--- FROM {uploaded_file.name} ---\n{doc_text}"
                 
                 # Track processed document
-                st.session_state.processed_docs.append({
+                processed_docs.append({
                     'name': uploaded_file.name,
-                    'chunks': len(documents)
+                    'chunks': len(documents),
+                    'content': doc_text
                 })
             
-            # Split documents into chunks
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1000,
-                chunk_overlap=200,
-                length_function=len,
-            )
-            chunks = text_splitter.split_documents(all_documents)
+            # Store processed content in session state
+            st.session_state.processed_docs = processed_docs
+            st.session_state.document_content = all_text
             
-            # Create embeddings and vector store
-            embeddings = OpenAIEmbeddings(openai_api_key=api_key)
-            vectorstore = Chroma.from_documents(
-                documents=chunks,
-                embedding=embeddings,
-                persist_directory="./chroma_db"
-            )
-            
-            # Create conversation chain
-            llm = ChatOpenAI(
-                openai_api_key=api_key,
-                model_name="gpt-3.5-turbo",
-                temperature=0.7
-            )
-            
-            memory = ConversationBufferMemory(
-                memory_key="chat_history",
-                return_messages=True
-            )
-            
-            conversation_chain = ConversationalRetrievalChain.from_llm(
-                llm=llm,
-                retriever=vectorstore.as_retriever(search_kwargs={"k": 5}),
-                memory=memory,
-                return_source_documents=True
-            )
-            
-            # Store in session state
-            st.session_state.vectorstore = vectorstore
-            st.session_state.conversation_chain = conversation_chain
+            # If vector stores are available, try to create embeddings
+            if VECTOR_STORE_AVAILABLE:
+                try:
+                    # Split documents into chunks
+                    text_splitter = RecursiveCharacterTextSplitter(
+                        chunk_size=1000,
+                        chunk_overlap=200,
+                        length_function=len,
+                    )
+                    chunks = text_splitter.split_documents(documents)
+                    
+                    # Create embeddings and vector store
+                    embeddings = OpenAIEmbeddings(openai_api_key=api_key)
+                    
+                    # Try Chroma first, then FAISS
+                    try:
+                        from langchain.vectorstores import Chroma
+                        vectorstore = Chroma.from_documents(
+                            documents=chunks,
+                            embedding=embeddings,
+                            persist_directory="./chroma_db"
+                        )
+                    except:
+                        from langchain.vectorstores import FAISS
+                        vectorstore = FAISS.from_documents(chunks, embeddings)
+                    
+                    # Create conversation chain
+                    from langchain.chains import ConversationalRetrievalChain
+                    from langchain.memory import ConversationBufferMemory
+                    
+                    llm = ChatOpenAI(
+                        openai_api_key=api_key,
+                        model_name="gpt-3.5-turbo",
+                        temperature=0.7
+                    )
+                    
+                    memory = ConversationBufferMemory(
+                        memory_key="chat_history",
+                        return_messages=True
+                    )
+                    
+                    conversation_chain = ConversationalRetrievalChain.from_llm(
+                        llm=llm,
+                        retriever=vectorstore.as_retriever(search_kwargs={"k": 5}),
+                        memory=memory,
+                        return_source_documents=True
+                    )
+                    
+                    # Store in session state
+                    st.session_state.vectorstore = vectorstore
+                    st.session_state.conversation_chain = conversation_chain
+                    
+                    st.success(f"✅ Successfully processed {len(uploaded_files)} PDFs with advanced RAG!")
+                    
+                except Exception as e:
+                    st.warning(f"Advanced RAG failed ({str(e)}), using basic text processing")
+                    st.session_state.conversation_chain = "basic"
+                    st.success(f"✅ Successfully processed {len(uploaded_files)} PDFs with basic text extraction!")
+            else:
+                # Basic mode without vector stores
+                st.session_state.conversation_chain = "basic"
+                st.success(f"✅ Successfully processed {len(uploaded_files)} PDFs with basic text extraction!")
             
             # Cleanup
             shutil.rmtree(temp_dir)
-            
-            st.success(f"✅ Successfully processed {len(uploaded_files)} PDFs into {len(chunks)} knowledge chunks!")
             st.info("🎯 Now I can answer questions based on your specific documents!")
             
         except Exception as e:
@@ -238,8 +279,8 @@ if prompt := st.chat_input("Ask about fenestration, windows, doors, or upload a 
         if api_key:
             try:
                 # Use RAG if available and documents are processed
-                if st.session_state.conversation_chain and RAG_AVAILABLE:
-                    # Use RAG system with document knowledge
+                if st.session_state.conversation_chain and st.session_state.conversation_chain != "basic" and RAG_AVAILABLE:
+                    # Use advanced RAG system with document knowledge
                     result = st.session_state.conversation_chain({
                         "question": prompt
                     })
@@ -256,6 +297,27 @@ if prompt := st.chat_input("Ask about fenestration, windows, doors, or upload a 
                             assistant_response += f"- {Path(source).name}, Page {page}\n"
                         
                         assistant_response += "\n*This answer is based on your uploaded documents.*"
+                
+                elif st.session_state.conversation_chain == "basic" and hasattr(st.session_state, 'document_content'):
+                    # Use basic text processing with document content
+                    import openai
+                    openai.api_key = api_key
+                    
+                    # Include document content in the prompt
+                    document_context = st.session_state.document_content[:8000]  # Limit context size
+                    
+                    response = openai.ChatCompletion.create(
+                        model="gpt-3.5-turbo",
+                        messages=[
+                            {"role": "system", "content": "You are an expert in fenestration, windows, doors, glazing systems, and building envelope. Answer questions based on the provided document content. Be specific and cite information from the documents."},
+                            {"role": "user", "content": f"Based on this document content:\n\n{document_context}\n\nQuestion: {prompt}"}
+                        ],
+                        temperature=0.7,
+                        max_tokens=800
+                    )
+                    
+                    assistant_response = response.choices[0].message['content']
+                    assistant_response += "\n\n📄 *This answer is based on your uploaded documents.*"
                 
                 else:
                     # Fallback to regular OpenAI API
