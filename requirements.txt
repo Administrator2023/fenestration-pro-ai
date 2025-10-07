@@ -40,7 +40,6 @@ altair==5.0.1
 
 # Database and Storage
 sqlalchemy==2.0.21
-sqlite3
 redis==5.0.0
 boto3==1.34.144
 

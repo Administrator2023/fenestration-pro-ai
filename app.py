@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 
+# Version: 1.0.1 - Fixed requirements.txt issue
 st.set_page_config(
     page_title="Fenestration Pro AI",
     page_icon="🏗️",
