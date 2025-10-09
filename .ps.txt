@@ -1,0 +1,5 @@
+UID          PID    PPID  C STIME TTY          TIME CMD
+root           1       0  0 16:30 ?        00:00:00 /pod-daemon
+ubuntu       322       1  0 21:25 ?        00:00:01 /exec-daemon/node /exec-daemon/index.js
+ubuntu       905     322 25 21:27 ?        00:00:00 /bin/bash -O extglob -c snap=$(command cat <&3) && builtin shopt -s extglob && builtin eval -- "$snap" && { builtin export PWD="$(builtin pwd)"; builtin eval "$1" < /dev/null; }; COMMAND_EXIT_CODE=$?; dump_bash_state >&4; builtin exit $COMMAND_EXIT_CODE -- ps -ef > "/workspace/.ps.txt"
+ubuntu       917     905  0 21:27 ?        00:00:00 ps -ef
