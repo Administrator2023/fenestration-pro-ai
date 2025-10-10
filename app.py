@@ -166,6 +166,201 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+# Define functions before UI so they're available when buttons trigger
+def get_embeddings(api_key: str):
+    """Return OpenAIEmbeddings with compatibility across versions."""
+    try:
+        return OpenAIEmbeddings(api_key=api_key)
+    except TypeError:
+        return OpenAIEmbeddings(openai_api_key=api_key)
+
+def create_llm(api_key: str, model_name: str):
+    """Return ChatOpenAI with compatibility across versions."""
+    try:
+        return ChatOpenAI(api_key=api_key, model=model_name, temperature=0.7)
+    except TypeError:
+        return ChatOpenAI(openai_api_key=api_key, model_name=model_name, temperature=0.7)
+
+def create_conversation_chain(vectorstore, api_key: str, model_name: str):
+    llm = create_llm(api_key, model_name)
+    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+    return ConversationalRetrievalChain.from_llm(
+        llm=llm,
+        retriever=vectorstore.as_retriever(search_kwargs={"k": 8}),
+        memory=memory,
+        return_source_documents=True,
+    )
+
+def load_persistent_vectorstore(api_key: str):
+    """Try to load a persisted vector store from disk."""
+    embeddings = get_embeddings(api_key)
+    # Prefer Chroma if present
+    try:
+        if os.path.isdir(PERSIST_DIR) and os.listdir(PERSIST_DIR):
+            try:
+                return Chroma(persist_directory=PERSIST_DIR, embedding_function=embeddings)
+            except TypeError:
+                return Chroma(persist_directory=PERSIST_DIR, embedding=embeddings)
+    except Exception:
+        pass
+    # Fallback to FAISS
+    try:
+        if os.path.isdir(FAISS_DIR):
+            return FAISS.load_local(FAISS_DIR, embeddings, allow_dangerous_deserialization=True)
+    except Exception:
+        pass
+    return None
+
+def process_pdfs(uploaded_files, api_key):
+    """Process PDF files and extract content"""
+    with st.spinner("🧠 Processing PDFs and extracting content..."):
+        try:
+            # Create temporary directory
+            temp_dir = tempfile.mkdtemp()
+            all_text = ""
+            processed_docs = []
+            all_documents = []
+            
+            # Process each PDF
+            for uploaded_file in uploaded_files:
+                # Save uploaded file temporarily
+                temp_path = os.path.join(temp_dir, uploaded_file.name)
+                with open(temp_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                
+                doc_text = ""
+                chunks_count = 0
+                
+                # Try different PDF processing methods
+                if RAG_AVAILABLE and PyPDFLoader is not None:
+                    try:
+                        # Use PyPDFLoader if available
+                        loader = PyPDFLoader(temp_path)
+                        docs = loader.load()
+                        doc_text = "\n".join([doc.page_content for doc in docs])
+                        chunks_count = len(docs)
+                        all_documents.extend(docs)
+                    except Exception as e:
+                        st.warning(f"PyPDFLoader failed, trying fallback: {str(e)}")
+                
+                # Fallback to PyPDF2 if needed
+                if not doc_text and PYPDF2_AVAILABLE:
+                    try:
+                        with open(temp_path, 'rb') as file:
+                            pdf_reader = PyPDF2.PdfReader(file)
+                            page_count = len(pdf_reader.pages)
+                            for page_num in range(page_count):
+                                page = pdf_reader.pages[page_num]
+                                page_text = page.extract_text() or ""
+                                doc_text += page_text + "\n"
+                                if Document is not None:
+                                    all_documents.append(
+                                        Document(
+                                            page_content=page_text,
+                                            metadata={"source": uploaded_file.name, "page": page_num + 1},
+                                        )
+                                    )
+                            chunks_count = page_count
+                    except Exception as e:
+                        st.warning(f"PyPDF2 failed: {str(e)}")
+                
+                # If still no text, show error
+                if not doc_text:
+                    st.error(f"Could not extract text from {uploaded_file.name}")
+                    continue
+                
+                all_text += f"\n\n--- FROM {uploaded_file.name} ---\n{doc_text}"
+                
+                # Track processed document
+                processed_docs.append({
+                    'name': uploaded_file.name,
+                    'chunks': chunks_count,
+                    'content': doc_text
+                })
+            
+            # Store processed content in session state
+            st.session_state.processed_docs = processed_docs
+            st.session_state.document_content = all_text
+            
+            # If vector stores are available, try to create embeddings
+            if VECTOR_STORE_AVAILABLE:
+                try:
+                    # Split accumulated documents into chunks
+                    text_splitter = RecursiveCharacterTextSplitter(
+                        chunk_size=1000,
+                        chunk_overlap=200,
+                        length_function=len,
+                    )
+                    if not all_documents:
+                        st.error("No document content extracted. Nothing to index.")
+                        shutil.rmtree(temp_dir)
+                        return
+                    chunks = text_splitter.split_documents(all_documents)
+
+                    # Create embeddings and vector store
+                    embeddings = get_embeddings(api_key)
+
+                    # Try Chroma with persistence first
+                    try:
+                        vectorstore = None
+                        try:
+                            vectorstore = Chroma.from_documents(
+                                documents=chunks,
+                                embedding=embeddings,
+                                persist_directory=PERSIST_DIR,
+                            )
+                        except TypeError:
+                            vectorstore = Chroma.from_documents(
+                                documents=chunks,
+                                embedding_function=embeddings,
+                                persist_directory=PERSIST_DIR,
+                            )
+                        # Ensure persisted
+                        try:
+                            vectorstore.persist()
+                        except Exception:
+                            pass
+                    except Exception:
+                        # Fallback to FAISS saved locally
+                        vectorstore = FAISS.from_documents(chunks, embeddings)
+                        try:
+                            vectorstore.save_local(FAISS_DIR)
+                        except Exception:
+                            pass
+
+                    # Create conversation chain with selected model
+                    conversation_chain = create_conversation_chain(
+                        vectorstore, api_key, st.session_state.get("selected_model", "gpt-4o-mini")
+                    )
+
+                    # Store in session state
+                    st.session_state.vectorstore = vectorstore
+                    st.session_state.conversation_chain = conversation_chain
+
+                    st.success(
+                        f"✅ Successfully processed {len(uploaded_files)} PDFs and updated the persistent knowledge base!"
+                    )
+
+                except Exception as e:
+                    st.warning(f"Advanced RAG failed ({str(e)}), using basic text processing")
+                    st.session_state.conversation_chain = "basic"
+                    st.success(
+                        f"✅ Successfully processed {len(uploaded_files)} PDFs with basic text extraction!"
+                    )
+            else:
+                # Basic mode without vector stores
+                st.session_state.conversation_chain = "basic"
+                st.success(f"✅ Successfully processed {len(uploaded_files)} PDFs with basic text extraction!")
+                st.info("📚 I can now answer questions based on your uploaded documents!")
+            
+            # Cleanup
+            shutil.rmtree(temp_dir)
+            st.info("🎯 Now I can answer questions based on your specific documents!")
+            
+        except Exception as e:
+            st.error(f"Error processing PDFs: {str(e)}")
+            st.info("Make sure you have a valid OpenAI API key and try again.")
+
 # Sidebar
 with st.sidebar:
     st.header("⚙️ Configuration")
