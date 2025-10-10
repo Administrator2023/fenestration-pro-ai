@@ -214,13 +214,7 @@ with st.sidebar:
                         st.warning("No persisted knowledge found to load")
                 except Exception as e:
                     st.error(f"Failed to reload knowledge: {str(e)}")
-            try:
-                st.rerun()
-            except AttributeError:
-                try:
-                    st.experimental_rerun()
-                except Exception:
-                    pass
+            # Avoid explicit rerun to prevent AttributeError on some environments
     with col_k2:
         if st.button("🧹 Clear Knowledge", help="Delete persisted vector stores from disk"):
             try:
@@ -599,7 +593,7 @@ if prompt := st.chat_input("Ask about fenestration, windows, doors, or upload a 
     
     # Add assistant response
     st.session_state.messages.append({"role": "assistant", "content": assistant_response})
-    st.rerun()
+    # Avoid rerun calls to prevent AttributeError in certain hosting environments
 
 # Footer
 st.markdown("---")
