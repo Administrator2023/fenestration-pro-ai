@@ -2,7 +2,11 @@ import streamlit as st
 import os
 import tempfile
 import shutil
+import json
+import uuid
+from datetime import datetime, date, timedelta
 from pathlib import Path
+import pandas as pd
 
 # RAG imports - optional and version-compatible
 RAG_AVAILABLE = False
@@ -92,9 +96,60 @@ try:
 except Exception:
     CHROMA_CLIENT_SETTINGS = None
 
-# Persistent storage locations
-PERSIST_DIR = "./chroma_db"
-FAISS_DIR = "./faiss_index"
+# Project-scoped storage helpers
+DATA_ROOT = "./data/projects"
+
+def ensure_directory(path: str) -> None:
+    Path(path).mkdir(parents=True, exist_ok=True)
+
+def get_selected_project() -> str:
+    return st.session_state.get("selected_project", "Default")
+
+def get_project_dir(project: str) -> str:
+    return os.path.join(DATA_ROOT, project)
+
+def get_kb_dirs_for_current_project() -> tuple[str, str]:
+    project = get_selected_project()
+    base = get_project_dir(project)
+    persist_dir = os.path.join(base, "chroma_db")
+    faiss_dir = os.path.join(base, "faiss_index")
+    ensure_directory(base)
+    ensure_directory(persist_dir)
+    ensure_directory(faiss_dir)
+    return persist_dir, faiss_dir
+
+def load_json_collection(project: str, name: str) -> list:
+    project_dir = get_project_dir(project)
+    ensure_directory(project_dir)
+    fp = os.path.join(project_dir, f"{name}.json")
+    if not os.path.exists(fp):
+        return []
+    try:
+        with open(fp, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+def save_json_collection(project: str, name: str, items: list) -> None:
+    project_dir = get_project_dir(project)
+    ensure_directory(project_dir)
+    fp = os.path.join(project_dir, f"{name}.json")
+    with open(fp, "w", encoding="utf-8") as f:
+        json.dump(items, f, indent=2, default=str)
+
+def save_attachments(files, category: str) -> list[dict]:
+    """Save uploaded files under project folder and return metadata list."""
+    project = get_selected_project()
+    saved = []
+    base = os.path.join(get_project_dir(project), "uploads", category)
+    ensure_directory(base)
+    for file in files or []:
+        safe_name = Path(file.name).name
+        dest = os.path.join(base, f"{uuid.uuid4().hex}_{safe_name}")
+        with open(dest, "wb") as out:
+            out.write(file.getbuffer())
+        saved.append({"name": safe_name, "path": dest})
+    return saved
 
 # Try to import PyPDF2 as fallback
 try:
@@ -229,12 +284,13 @@ def load_persistent_vectorstore(api_key: str):
     """Try to load a persisted vector store from disk."""
     embeddings = get_embeddings(api_key)
     # Prefer Chroma if present
+    persist_dir, faiss_dir = get_kb_dirs_for_current_project()
     try:
-        if os.path.isdir(PERSIST_DIR) and os.listdir(PERSIST_DIR):
+        if os.path.isdir(persist_dir) and os.listdir(persist_dir):
             # Try with embedding_function + client_settings
             try:
                 return Chroma(
-                    persist_directory=PERSIST_DIR,
+                    persist_directory=persist_dir,
                     embedding_function=embeddings,
                     client_settings=CHROMA_CLIENT_SETTINGS,
                 )
@@ -242,22 +298,22 @@ def load_persistent_vectorstore(api_key: str):
                 # Try with embedding + client_settings
                 try:
                     return Chroma(
-                        persist_directory=PERSIST_DIR,
+                        persist_directory=persist_dir,
                         embedding=embeddings,
                         client_settings=CHROMA_CLIENT_SETTINGS,
                     )
                 except TypeError:
                     # Fallback without client_settings
                     try:
-                        return Chroma(persist_directory=PERSIST_DIR, embedding_function=embeddings)
+                        return Chroma(persist_directory=persist_dir, embedding_function=embeddings)
                     except TypeError:
-                        return Chroma(persist_directory=PERSIST_DIR, embedding=embeddings)
+                        return Chroma(persist_directory=persist_dir, embedding=embeddings)
     except Exception:
         pass
     # Fallback to FAISS
     try:
-        if os.path.isdir(FAISS_DIR):
-            return FAISS.load_local(FAISS_DIR, embeddings, allow_dangerous_deserialization=True)
+        if os.path.isdir(faiss_dir):
+            return FAISS.load_local(faiss_dir, embeddings, allow_dangerous_deserialization=True)
     except Exception:
         pass
     return None
@@ -359,7 +415,7 @@ def process_pdfs(uploaded_files, api_key):
                             vectorstore = Chroma.from_documents(
                                 documents=chunks,
                                 embedding=embeddings,
-                                persist_directory=PERSIST_DIR,
+                                persist_directory=get_kb_dirs_for_current_project()[0],
                                 client_settings=CHROMA_CLIENT_SETTINGS,
                             )
                         except TypeError:
@@ -368,7 +424,7 @@ def process_pdfs(uploaded_files, api_key):
                                 vectorstore = Chroma.from_documents(
                                     documents=chunks,
                                     embedding_function=embeddings,
-                                    persist_directory=PERSIST_DIR,
+                                    persist_directory=get_kb_dirs_for_current_project()[0],
                                     client_settings=CHROMA_CLIENT_SETTINGS,
                                 )
                             except TypeError:
@@ -377,14 +433,14 @@ def process_pdfs(uploaded_files, api_key):
                                     vectorstore = Chroma.from_documents(
                                         documents=chunks,
                                         embedding=embeddings,
-                                        persist_directory=PERSIST_DIR,
+                                        persist_directory=get_kb_dirs_for_current_project()[0],
                                     )
                                 except TypeError:
                                     # 4) embedding_function without client_settings
                                     vectorstore = Chroma.from_documents(
                                         documents=chunks,
                                         embedding_function=embeddings,
-                                        persist_directory=PERSIST_DIR,
+                                        persist_directory=get_kb_dirs_for_current_project()[0],
                                     )
                         # Ensure persisted
                         try:
@@ -395,7 +451,7 @@ def process_pdfs(uploaded_files, api_key):
                         # Fallback to FAISS saved locally
                         vectorstore = FAISS.from_documents(chunks, embeddings)
                         try:
-                            vectorstore.save_local(FAISS_DIR)
+                            vectorstore.save_local(get_kb_dirs_for_current_project()[1])
                         except Exception:
                             pass
 
@@ -475,6 +531,20 @@ with st.sidebar:
         st.session_state.selected_model = model_options[1]
     selected_model = st.selectbox("Model", model_options, index=model_options.index(st.session_state.selected_model))
     st.session_state.selected_model = selected_model
+
+    # Project selector
+    st.markdown("---")
+    existing_projects = sorted([p.name for p in Path(DATA_ROOT).glob("*") if p.is_dir()])
+    col_p1, col_p2 = st.columns([3,1])
+    with col_p1:
+        selected_project = st.selectbox("Project", options=["Default"] + existing_projects, index=0)
+    with col_p2:
+        if st.button("➕ New"):
+            new_name = st.text_input("New project name", key="new_project_name")
+            if new_name:
+                st.session_state.selected_project = new_name
+                ensure_directory(get_project_dir(new_name))
+        st.session_state.selected_project = selected_project
 
     # Engineering QA parameters
     st.markdown("---")
@@ -791,7 +861,7 @@ for message in st.session_state.messages:
         st.markdown(f'<div class="chat-message assistant-message"><strong>🤖 Fenestration Pro AI</strong><br>{message["content"]}</div>', 
                    unsafe_allow_html=True)
 
-# Client-side assistant area with email attachment metadata
+# Client-side assistant area with attachments and task logging
 st.markdown("---")
 st.subheader("📨 Client Assistant")
 col_e1, col_e2 = st.columns(2)
@@ -799,6 +869,42 @@ with col_e1:
     client_email = st.text_input("Client Email (optional)", help="Attach an email to this conversation")
 with col_e2:
     ticket_id = st.text_input("Ticket/Project ID (optional)")
+
+attachments = st.file_uploader("Attach files (PDF/images)", type=["pdf","png","jpg","jpeg"], accept_multiple_files=True)
+
+# Lightweight task capture
+st.markdown("### ✅ Quick Task Capture")
+col_ta1, col_ta2, col_ta3 = st.columns([3,1,1])
+with col_ta1:
+    new_task = st.text_input("Task description", key="new_task_desc")
+with col_ta2:
+    due_in_days = st.number_input("Due (days)", min_value=0, max_value=365, value=7, step=1)
+with col_ta3:
+    add_task_clicked = st.button("Add Task")
+
+if add_task_clicked and new_task:
+    project = get_selected_project()
+    tasks = load_json_collection(project, "tasks")
+    due_date = (date.today() + timedelta(days=int(due_in_days))).isoformat()
+    tasks.append({
+        "id": uuid.uuid4().hex,
+        "desc": new_task,
+        "due": due_date,
+        "created": datetime.now().isoformat(),
+        "status": "open"
+    })
+    save_json_collection(project, "tasks", tasks)
+    st.success("Task added")
+
+# Show current tasks
+with st.expander("Project Tasks"):
+    project = get_selected_project()
+    tasks = load_json_collection(project, "tasks")
+    if tasks:
+        df = pd.DataFrame(tasks)
+        st.dataframe(df[["id","desc","due","status"]], use_container_width=True)
+    else:
+        st.info("No tasks yet.")
 
 # Chat input
 if prompt := st.chat_input("Ask a question or describe an action..."):
@@ -904,6 +1010,9 @@ if prompt := st.chat_input("Ask a question or describe an action..."):
         else:
             assistant_response = "Please add your OpenAI API key in the sidebar to enable AI responses."
     
+    # Save attachments
+    saved_meta = save_attachments(attachments, category="client") if attachments else []
+
     # Add assistant response and optionally append metadata for email/ticket
     meta_prefix = ""
     if client_email or ticket_id:
@@ -912,6 +1021,8 @@ if prompt := st.chat_input("Ask a question or describe an action..."):
             meta.append(f"Email: {client_email}")
         if ticket_id:
             meta.append(f"Ticket: {ticket_id}")
+        if saved_meta:
+            meta.append(f"Attachments: {len(saved_meta)}")
         meta_prefix = "[" + ", ".join(meta) + "]\n\n"
     st.session_state.messages.append({"role": "assistant", "content": meta_prefix + assistant_response})
     # Avoid rerun calls to prevent AttributeError in certain hosting environments
