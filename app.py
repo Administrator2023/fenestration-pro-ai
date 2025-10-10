@@ -7,6 +7,14 @@ import uuid
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import pandas as pd
+import logging
+
+# Reduce noisy Chroma PostHog errors and disable telemetry via env
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+os.environ.setdefault("CHROMA_TELEMETRY_IMPL", "none")
+os.environ.setdefault("CHROMADB_TELEMETRY_IMPL", "none")
+logging.getLogger("chromadb.telemetry.product.posthog").setLevel(logging.CRITICAL)
+logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
 
 # RAG imports - optional and version-compatible
 RAG_AVAILABLE = False
@@ -196,6 +204,9 @@ if "chunk_size" not in st.session_state:
     st.session_state.chunk_size = 1000
 if "chunk_overlap" not in st.session_state:
     st.session_state.chunk_overlap = 200
+if "use_chroma" not in st.session_state:
+    # Default to FAISS to avoid telemetry issues in some hosts
+    st.session_state.use_chroma = False
 
 # Custom CSS
 st.markdown("""
@@ -407,53 +418,61 @@ def process_pdfs(uploaded_files, api_key):
                     # Create embeddings and vector store
                     embeddings = get_embeddings(api_key)
 
-                    # Try Chroma with persistence first
-                    try:
-                        vectorstore = None
-                        # 1) embedding + client_settings
-                        try:
-                            vectorstore = Chroma.from_documents(
-                                documents=chunks,
-                                embedding=embeddings,
-                                persist_directory=get_kb_dirs_for_current_project()[0],
-                                client_settings=CHROMA_CLIENT_SETTINGS,
-                            )
-                        except TypeError:
-                            # 2) embedding_function + client_settings
-                            try:
-                                vectorstore = Chroma.from_documents(
-                                    documents=chunks,
-                                    embedding_function=embeddings,
-                                    persist_directory=get_kb_dirs_for_current_project()[0],
-                                    client_settings=CHROMA_CLIENT_SETTINGS,
-                                )
-                            except TypeError:
-                                # 3) embedding without client_settings
-                                try:
-                                    vectorstore = Chroma.from_documents(
-                                        documents=chunks,
-                                        embedding=embeddings,
-                                        persist_directory=get_kb_dirs_for_current_project()[0],
-                                    )
-                                except TypeError:
-                                    # 4) embedding_function without client_settings
-                                    vectorstore = Chroma.from_documents(
-                                        documents=chunks,
-                                        embedding_function=embeddings,
-                                        persist_directory=get_kb_dirs_for_current_project()[0],
-                                    )
-                        # Ensure persisted
-                        try:
-                            vectorstore.persist()
-                        except Exception:
-                            pass
-                    except Exception:
-                        # Fallback to FAISS saved locally
+                    # Prefer FAISS by default to avoid Chroma telemetry issues
+                    if not st.session_state.get("use_chroma", False):
                         vectorstore = FAISS.from_documents(chunks, embeddings)
                         try:
                             vectorstore.save_local(get_kb_dirs_for_current_project()[1])
                         except Exception:
                             pass
+                    else:
+                        # Try Chroma with persistence
+                        try:
+                            vectorstore = None
+                            # 1) embedding + client_settings
+                            try:
+                                vectorstore = Chroma.from_documents(
+                                    documents=chunks,
+                                    embedding=embeddings,
+                                    persist_directory=get_kb_dirs_for_current_project()[0],
+                                    client_settings=CHROMA_CLIENT_SETTINGS,
+                                )
+                            except TypeError:
+                                # 2) embedding_function + client_settings
+                                try:
+                                    vectorstore = Chroma.from_documents(
+                                        documents=chunks,
+                                        embedding_function=embeddings,
+                                        persist_directory=get_kb_dirs_for_current_project()[0],
+                                        client_settings=CHROMA_CLIENT_SETTINGS,
+                                    )
+                                except TypeError:
+                                    # 3) embedding without client_settings
+                                    try:
+                                        vectorstore = Chroma.from_documents(
+                                            documents=chunks,
+                                            embedding=embeddings,
+                                            persist_directory=get_kb_dirs_for_current_project()[0],
+                                        )
+                                    except TypeError:
+                                        # 4) embedding_function without client_settings
+                                        vectorstore = Chroma.from_documents(
+                                            documents=chunks,
+                                            embedding_function=embeddings,
+                                            persist_directory=get_kb_dirs_for_current_project()[0],
+                                        )
+                            # Ensure persisted
+                            try:
+                                vectorstore.persist()
+                            except Exception:
+                                pass
+                        except Exception:
+                            # Fallback to FAISS saved locally
+                            vectorstore = FAISS.from_documents(chunks, embeddings)
+                            try:
+                                vectorstore.save_local(get_kb_dirs_for_current_project()[1])
+                            except Exception:
+                                pass
 
                     # Create conversation chain with selected model
                     conversation_chain = create_conversation_chain(
