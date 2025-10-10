@@ -18,6 +18,7 @@ FAISS = None
 ConversationalRetrievalChain = None
 ConversationBufferMemory = None
 Document = None
+CHROMA_CLIENT_SETTINGS = None
 
 try:
     from langchain_community.document_loaders import PyPDFLoader as _PyPDFLoader
@@ -83,6 +84,13 @@ except ImportError:
     except ImportError:
         # RAG not available - we'll use basic mode
         pass
+
+# Configure Chroma telemetry off if available
+try:
+    from chromadb.config import Settings as _ChromaSettings
+    CHROMA_CLIENT_SETTINGS = _ChromaSettings(anonymized_telemetry=False)
+except Exception:
+    CHROMA_CLIENT_SETTINGS = None
 
 # Persistent storage locations
 PERSIST_DIR = "./chroma_db"
@@ -223,10 +231,27 @@ def load_persistent_vectorstore(api_key: str):
     # Prefer Chroma if present
     try:
         if os.path.isdir(PERSIST_DIR) and os.listdir(PERSIST_DIR):
+            # Try with embedding_function + client_settings
             try:
-                return Chroma(persist_directory=PERSIST_DIR, embedding_function=embeddings)
+                return Chroma(
+                    persist_directory=PERSIST_DIR,
+                    embedding_function=embeddings,
+                    client_settings=CHROMA_CLIENT_SETTINGS,
+                )
             except TypeError:
-                return Chroma(persist_directory=PERSIST_DIR, embedding=embeddings)
+                # Try with embedding + client_settings
+                try:
+                    return Chroma(
+                        persist_directory=PERSIST_DIR,
+                        embedding=embeddings,
+                        client_settings=CHROMA_CLIENT_SETTINGS,
+                    )
+                except TypeError:
+                    # Fallback without client_settings
+                    try:
+                        return Chroma(persist_directory=PERSIST_DIR, embedding_function=embeddings)
+                    except TypeError:
+                        return Chroma(persist_directory=PERSIST_DIR, embedding=embeddings)
     except Exception:
         pass
     # Fallback to FAISS
@@ -329,18 +354,38 @@ def process_pdfs(uploaded_files, api_key):
                     # Try Chroma with persistence first
                     try:
                         vectorstore = None
+                        # 1) embedding + client_settings
                         try:
                             vectorstore = Chroma.from_documents(
                                 documents=chunks,
                                 embedding=embeddings,
                                 persist_directory=PERSIST_DIR,
+                                client_settings=CHROMA_CLIENT_SETTINGS,
                             )
                         except TypeError:
-                            vectorstore = Chroma.from_documents(
-                                documents=chunks,
-                                embedding_function=embeddings,
-                                persist_directory=PERSIST_DIR,
-                            )
+                            # 2) embedding_function + client_settings
+                            try:
+                                vectorstore = Chroma.from_documents(
+                                    documents=chunks,
+                                    embedding_function=embeddings,
+                                    persist_directory=PERSIST_DIR,
+                                    client_settings=CHROMA_CLIENT_SETTINGS,
+                                )
+                            except TypeError:
+                                # 3) embedding without client_settings
+                                try:
+                                    vectorstore = Chroma.from_documents(
+                                        documents=chunks,
+                                        embedding=embeddings,
+                                        persist_directory=PERSIST_DIR,
+                                    )
+                                except TypeError:
+                                    # 4) embedding_function without client_settings
+                                    vectorstore = Chroma.from_documents(
+                                        documents=chunks,
+                                        embedding_function=embeddings,
+                                        persist_directory=PERSIST_DIR,
+                                    )
                         # Ensure persisted
                         try:
                             vectorstore.persist()
