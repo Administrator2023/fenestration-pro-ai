@@ -95,6 +95,12 @@ try:
 except ImportError:
     PYPDF2_AVAILABLE = False
 
+# Optional utilities for analytics/export
+try:
+    from utils import AnalyticsManager, create_download_link
+except Exception:
+    AnalyticsManager, create_download_link = None, None
+
 st.set_page_config(
     page_title="Fenestration Pro AI",
     page_icon="🏗️",
@@ -117,6 +123,16 @@ if "conversation_chain" not in st.session_state:
 
 if "processed_docs" not in st.session_state:
     st.session_state.processed_docs = []
+
+# Default parameters for an engineering office knowledge base
+if "temperature" not in st.session_state:
+    st.session_state.temperature = 0.3
+if "retrieval_k" not in st.session_state:
+    st.session_state.retrieval_k = 8
+if "chunk_size" not in st.session_state:
+    st.session_state.chunk_size = 1000
+if "chunk_overlap" not in st.session_state:
+    st.session_state.chunk_overlap = 200
 
 # Custom CSS
 st.markdown("""
@@ -177,9 +193,9 @@ def get_embeddings(api_key: str):
 def create_llm(api_key: str, model_name: str):
     """Return ChatOpenAI with compatibility across versions."""
     try:
-        return ChatOpenAI(api_key=api_key, model=model_name, temperature=0.7)
+        return ChatOpenAI(api_key=api_key, model=model_name, temperature=st.session_state.get("temperature", 0.3))
     except TypeError:
-        return ChatOpenAI(openai_api_key=api_key, model_name=model_name, temperature=0.7)
+        return ChatOpenAI(openai_api_key=api_key, model_name=model_name, temperature=st.session_state.get("temperature", 0.3))
 
 def create_conversation_chain(vectorstore, api_key: str, model_name: str):
     llm = create_llm(api_key, model_name)
@@ -188,7 +204,7 @@ def create_conversation_chain(vectorstore, api_key: str, model_name: str):
     try:
         return ConversationalRetrievalChain.from_llm(
             llm=llm,
-            retriever=vectorstore.as_retriever(search_kwargs={"k": 8}),
+            retriever=vectorstore.as_retriever(search_kwargs={"k": st.session_state.get("retrieval_k", 8)}),
             memory=memory,
             return_source_documents=True,
             output_key="answer",
@@ -196,7 +212,7 @@ def create_conversation_chain(vectorstore, api_key: str, model_name: str):
     except TypeError:
         return ConversationalRetrievalChain.from_llm(
             llm=llm,
-            retriever=vectorstore.as_retriever(search_kwargs={"k": 8}),
+            retriever=vectorstore.as_retriever(search_kwargs={"k": st.session_state.get("retrieval_k", 8)}),
             memory=memory,
             return_source_documents=True,
         )
@@ -297,8 +313,8 @@ def process_pdfs(uploaded_files, api_key):
                 try:
                     # Split accumulated documents into chunks
                     text_splitter = RecursiveCharacterTextSplitter(
-                        chunk_size=1000,
-                        chunk_overlap=200,
+                        chunk_size=st.session_state.get("chunk_size", 1000),
+                        chunk_overlap=st.session_state.get("chunk_overlap", 200),
                         length_function=len,
                     )
                     if not all_documents:
@@ -401,6 +417,19 @@ with st.sidebar:
     selected_model = st.selectbox("Model", model_options, index=model_options.index(st.session_state.selected_model))
     st.session_state.selected_model = selected_model
 
+    # Engineering QA parameters
+    st.markdown("---")
+    col_t1, col_t2 = st.columns(2)
+    with col_t1:
+        st.session_state.temperature = st.slider("Answer temperature", 0.0, 1.0, st.session_state.temperature, 0.05)
+    with col_t2:
+        st.session_state.retrieval_k = st.slider("Top-K passages", 1, 20, st.session_state.retrieval_k, 1)
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+        st.session_state.chunk_size = st.number_input("Chunk size", min_value=200, max_value=4000, value=st.session_state.chunk_size, step=50)
+    with col_c2:
+        st.session_state.chunk_overlap = st.number_input("Chunk overlap", min_value=0, max_value=1000, value=st.session_state.chunk_overlap, step=10)
+
     # Knowledge base controls
     st.markdown("---")
     col_k1, col_k2 = st.columns(2)
@@ -470,8 +499,21 @@ with st.sidebar:
         st.info("Upload & process PDFs for document-specific answers")
     
     st.markdown("### 📊 Stats")
-    st.metric("Total Queries", len(st.session_state.get('messages', [])) // 2)
-    st.metric("Knowledge Base", "Active" if st.session_state.conversation_chain else "Inactive")
+    if AnalyticsManager:
+        stats = AnalyticsManager.calculate_session_stats()
+        col_s1, col_s2, col_s3 = st.columns(3)
+        col_s1.metric("Total Messages", stats.get("total_messages", 0))
+        col_s2.metric("User Queries", stats.get("user_queries", 0))
+        col_s3.metric("Avg Response (s)", f"{stats.get('avg_response_time', 0):.2f}")
+        with st.expander("Export analytics"):
+            fmt = st.selectbox("Format", ["json", "csv"], index=0)
+            if st.button("Export"):
+                data = AnalyticsManager.export_analytics(fmt)
+                if create_download_link:
+                    st.markdown(create_download_link(data, f"analytics.{fmt}"), unsafe_allow_html=True)
+    else:
+        st.metric("Total Queries", len(st.session_state.get('messages', [])) // 2)
+        st.metric("Knowledge Base", "Active" if st.session_state.conversation_chain else "Inactive")
 
 # Session state already initialized at the beginning of the app
 
