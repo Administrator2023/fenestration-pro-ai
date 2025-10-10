@@ -4,31 +4,89 @@ import tempfile
 import shutil
 from pathlib import Path
 
-# RAG imports - all optional
+# RAG imports - optional and version-compatible
 RAG_AVAILABLE = False
 VECTOR_STORE_AVAILABLE = False
 
+# Resolve LangChain imports across versions
+PyPDFLoader = None
+RecursiveCharacterTextSplitter = None
+OpenAIEmbeddings = None
+ChatOpenAI = None
+Chroma = None
+FAISS = None
+ConversationalRetrievalChain = None
+ConversationBufferMemory = None
+Document = None
+
 try:
-    from langchain.document_loaders import PyPDFLoader
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
-    from langchain.embeddings import OpenAIEmbeddings
-    from langchain.chat_models import ChatOpenAI
-    RAG_AVAILABLE = True
-    
-    # Try to import vector store
+    from langchain_community.document_loaders import PyPDFLoader as _PyPDFLoader
+    from langchain_text_splitters import (
+        RecursiveCharacterTextSplitter as _RecursiveCharacterTextSplitter,
+    )
+    from langchain_openai import (
+        OpenAIEmbeddings as _OpenAIEmbeddings,
+        ChatOpenAI as _ChatOpenAI,
+    )
+    from langchain_community.vectorstores import Chroma as _Chroma, FAISS as _FAISS
+    from langchain.chains import (
+        ConversationalRetrievalChain as _ConversationalRetrievalChain,
+    )
+    from langchain.memory import ConversationBufferMemory as _ConversationBufferMemory
     try:
-        from langchain.vectorstores import Chroma
+        from langchain_core.documents import Document as _Document
+    except ImportError:
+        from langchain.docstore.document import Document as _Document
+
+    PyPDFLoader = _PyPDFLoader
+    RecursiveCharacterTextSplitter = _RecursiveCharacterTextSplitter
+    OpenAIEmbeddings = _OpenAIEmbeddings
+    ChatOpenAI = _ChatOpenAI
+    Chroma = _Chroma
+    FAISS = _FAISS
+    ConversationalRetrievalChain = _ConversationalRetrievalChain
+    ConversationBufferMemory = _ConversationBufferMemory
+    Document = _Document
+    RAG_AVAILABLE = True
+    VECTOR_STORE_AVAILABLE = True
+except ImportError:
+    try:
+        from langchain.document_loaders import PyPDFLoader as _PyPDFLoader
+        from langchain.text_splitter import (
+            RecursiveCharacterTextSplitter as _RecursiveCharacterTextSplitter,
+        )
+        from langchain.embeddings import OpenAIEmbeddings as _OpenAIEmbeddings
+        from langchain.chat_models import ChatOpenAI as _ChatOpenAI
+        from langchain.vectorstores import Chroma as _Chroma, FAISS as _FAISS
+        from langchain.chains import (
+            ConversationalRetrievalChain as _ConversationalRetrievalChain,
+        )
+        from langchain.memory import (
+            ConversationBufferMemory as _ConversationBufferMemory,
+        )
+        try:
+            from langchain.docstore.document import Document as _Document
+        except ImportError:
+            _Document = None
+
+        PyPDFLoader = _PyPDFLoader
+        RecursiveCharacterTextSplitter = _RecursiveCharacterTextSplitter
+        OpenAIEmbeddings = _OpenAIEmbeddings
+        ChatOpenAI = _ChatOpenAI
+        Chroma = _Chroma
+        FAISS = _FAISS
+        ConversationalRetrievalChain = _ConversationalRetrievalChain
+        ConversationBufferMemory = _ConversationBufferMemory
+        Document = _Document
+        RAG_AVAILABLE = True
         VECTOR_STORE_AVAILABLE = True
     except ImportError:
-        try:
-            from langchain.vectorstores import FAISS
-            VECTOR_STORE_AVAILABLE = True
-        except ImportError:
-            VECTOR_STORE_AVAILABLE = False
-            
-except ImportError:
-    # RAG not available - that's OK, we'll use basic mode
-    pass
+        # RAG not available - we'll use basic mode
+        pass
+
+# Persistent storage locations
+PERSIST_DIR = "./chroma_db"
+FAISS_DIR = "./faiss_index"
 
 # Try to import PyPDF2 as fallback
 try:
@@ -126,6 +184,46 @@ with st.sidebar:
     
     st.markdown("---")
     
+    # Model selection
+    model_options = [
+        "gpt-4o",
+        "gpt-4o-mini",
+        "gpt-4.1-mini",
+        "gpt-3.5-turbo",
+    ]
+    if "selected_model" not in st.session_state:
+        st.session_state.selected_model = model_options[1]
+    selected_model = st.selectbox("Model", model_options, index=model_options.index(st.session_state.selected_model))
+    st.session_state.selected_model = selected_model
+
+    # Knowledge base controls
+    st.markdown("---")
+    col_k1, col_k2 = st.columns(2)
+    with col_k1:
+        if st.button("🔁 Reload Knowledge", help="Load persisted knowledge base from disk"):
+            if RAG_AVAILABLE and api_key:
+                try:
+                    vs = None
+                    vs = None
+                    vs = None
+                except Exception:
+                    pass
+            st.experimental_rerun()
+    with col_k2:
+        if st.button("🧹 Clear Knowledge", help="Delete persisted vector stores from disk"):
+            try:
+                if os.path.isdir(PERSIST_DIR):
+                    shutil.rmtree(PERSIST_DIR)
+                if os.path.isdir(FAISS_DIR):
+                    shutil.rmtree(FAISS_DIR)
+                st.session_state.vectorstore = None
+                st.session_state.conversation_chain = None
+                st.success("Cleared knowledge base from disk")
+            except Exception as e:
+                st.error(f"Failed to clear knowledge base: {str(e)}")
+
+    st.markdown("---")
+
     # File uploader
     uploaded_files = st.file_uploader(
         "📎 Upload PDF Documents",
@@ -166,6 +264,64 @@ with st.sidebar:
 
 # Session state already initialized at the beginning of the app
 
+def get_embeddings(api_key: str):
+    """Return OpenAIEmbeddings with compatibility across versions."""
+    try:
+        return OpenAIEmbeddings(api_key=api_key)
+    except TypeError:
+        return OpenAIEmbeddings(openai_api_key=api_key)
+
+def create_llm(api_key: str, model_name: str):
+    """Return ChatOpenAI with compatibility across versions."""
+    try:
+        return ChatOpenAI(api_key=api_key, model=model_name, temperature=0.7)
+    except TypeError:
+        return ChatOpenAI(openai_api_key=api_key, model_name=model_name, temperature=0.7)
+
+def create_conversation_chain(vectorstore, api_key: str, model_name: str):
+    llm = create_llm(api_key, model_name)
+    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+    return ConversationalRetrievalChain.from_llm(
+        llm=llm,
+        retriever=vectorstore.as_retriever(search_kwargs={"k": 8}),
+        memory=memory,
+        return_source_documents=True,
+    )
+
+def load_persistent_vectorstore(api_key: str):
+    """Try to load a persisted vector store from disk."""
+    embeddings = get_embeddings(api_key)
+    # Prefer Chroma if present
+    try:
+        if os.path.isdir(PERSIST_DIR) and os.listdir(PERSIST_DIR):
+            try:
+                return Chroma(persist_directory=PERSIST_DIR, embedding_function=embeddings)
+            except TypeError:
+                return Chroma(persist_directory=PERSIST_DIR, embedding=embeddings)
+    except Exception:
+        pass
+    # Fallback to FAISS
+    try:
+        if os.path.isdir(FAISS_DIR):
+            return FAISS.load_local(FAISS_DIR, embeddings, allow_dangerous_deserialization=True)
+    except Exception:
+        pass
+    return None
+
+# Attempt to auto-load a persisted knowledge base on startup
+if RAG_AVAILABLE and (st.session_state.get("vectorstore") is None):
+    api_key_autoload = st.secrets.get("OPENAI_API_KEY", "")
+    if api_key_autoload:
+        try:
+            vs = load_persistent_vectorstore(api_key_autoload)
+            if vs is not None:
+                st.session_state.vectorstore = vs
+                st.session_state.conversation_chain = create_conversation_chain(
+                    vs, api_key_autoload, st.session_state.get("selected_model", "gpt-4o-mini")
+                )
+        except Exception:
+            pass
+
 def process_pdfs(uploaded_files, api_key):
     """Process PDF files and extract content"""
     with st.spinner("🧠 Processing PDFs and extracting content..."):
@@ -174,6 +330,7 @@ def process_pdfs(uploaded_files, api_key):
             temp_dir = tempfile.mkdtemp()
             all_text = ""
             processed_docs = []
+            all_documents = []
             
             # Process each PDF
             for uploaded_file in uploaded_files:
@@ -186,13 +343,14 @@ def process_pdfs(uploaded_files, api_key):
                 chunks_count = 0
                 
                 # Try different PDF processing methods
-                if RAG_AVAILABLE:
+                if RAG_AVAILABLE and PyPDFLoader is not None:
                     try:
                         # Use PyPDFLoader if available
                         loader = PyPDFLoader(temp_path)
-                        documents = loader.load()
-                        doc_text = "\n".join([doc.page_content for doc in documents])
-                        chunks_count = len(documents)
+                        docs = loader.load()
+                        doc_text = "\n".join([doc.page_content for doc in docs])
+                        chunks_count = len(docs)
+                        all_documents.extend(docs)
                     except Exception as e:
                         st.warning(f"PyPDFLoader failed, trying fallback: {str(e)}")
                 
@@ -201,10 +359,19 @@ def process_pdfs(uploaded_files, api_key):
                     try:
                         with open(temp_path, 'rb') as file:
                             pdf_reader = PyPDF2.PdfReader(file)
-                            for page_num in range(len(pdf_reader.pages)):
+                            page_count = len(pdf_reader.pages)
+                            for page_num in range(page_count):
                                 page = pdf_reader.pages[page_num]
-                                doc_text += page.extract_text() + "\n"
-                            chunks_count = len(pdf_reader.pages)
+                                page_text = page.extract_text() or ""
+                                doc_text += page_text + "\n"
+                                if Document is not None:
+                                    all_documents.append(
+                                        Document(
+                                            page_content=page_text,
+                                            metadata={"source": uploaded_file.name, "page": page_num + 1},
+                                        )
+                                    )
+                            chunks_count = page_count
                     except Exception as e:
                         st.warning(f"PyPDF2 failed: {str(e)}")
                 
@@ -229,61 +396,68 @@ def process_pdfs(uploaded_files, api_key):
             # If vector stores are available, try to create embeddings
             if VECTOR_STORE_AVAILABLE:
                 try:
-                    # Split documents into chunks
+                    # Split accumulated documents into chunks
                     text_splitter = RecursiveCharacterTextSplitter(
                         chunk_size=1000,
                         chunk_overlap=200,
                         length_function=len,
                     )
-                    chunks = text_splitter.split_documents(documents)
-                    
+                    if not all_documents:
+                        st.error("No document content extracted. Nothing to index.")
+                        shutil.rmtree(temp_dir)
+                        return
+                    chunks = text_splitter.split_documents(all_documents)
+
                     # Create embeddings and vector store
-                    embeddings = OpenAIEmbeddings(openai_api_key=api_key)
-                    
-                    # Try Chroma first, then FAISS
+                    embeddings = get_embeddings(api_key)
+
+                    # Try Chroma with persistence first
                     try:
-                        from langchain.vectorstores import Chroma
-                        vectorstore = Chroma.from_documents(
-                            documents=chunks,
-                            embedding=embeddings,
-                            persist_directory="./chroma_db"
-                        )
-                    except:
-                        from langchain.vectorstores import FAISS
+                        vectorstore = None
+                        try:
+                            vectorstore = Chroma.from_documents(
+                                documents=chunks,
+                                embedding=embeddings,
+                                persist_directory=PERSIST_DIR,
+                            )
+                        except TypeError:
+                            vectorstore = Chroma.from_documents(
+                                documents=chunks,
+                                embedding_function=embeddings,
+                                persist_directory=PERSIST_DIR,
+                            )
+                        # Ensure persisted
+                        try:
+                            vectorstore.persist()
+                        except Exception:
+                            pass
+                    except Exception:
+                        # Fallback to FAISS saved locally
                         vectorstore = FAISS.from_documents(chunks, embeddings)
-                    
-                    # Create conversation chain
-                    from langchain.chains import ConversationalRetrievalChain
-                    from langchain.memory import ConversationBufferMemory
-                    
-                    llm = ChatOpenAI(
-                        openai_api_key=api_key,
-                        model_name="gpt-3.5-turbo",
-                        temperature=0.7
+                        try:
+                            vectorstore.save_local(FAISS_DIR)
+                        except Exception:
+                            pass
+
+                    # Create conversation chain with selected model
+                    conversation_chain = create_conversation_chain(
+                        vectorstore, api_key, st.session_state.get("selected_model", "gpt-4o-mini")
                     )
-                    
-                    memory = ConversationBufferMemory(
-                        memory_key="chat_history",
-                        return_messages=True
-                    )
-                    
-                    conversation_chain = ConversationalRetrievalChain.from_llm(
-                        llm=llm,
-                        retriever=vectorstore.as_retriever(search_kwargs={"k": 5}),
-                        memory=memory,
-                        return_source_documents=True
-                    )
-                    
+
                     # Store in session state
                     st.session_state.vectorstore = vectorstore
                     st.session_state.conversation_chain = conversation_chain
-                    
-                    st.success(f"✅ Successfully processed {len(uploaded_files)} PDFs with advanced RAG!")
-                    
+
+                    st.success(
+                        f"✅ Successfully processed {len(uploaded_files)} PDFs and updated the persistent knowledge base!"
+                    )
+
                 except Exception as e:
                     st.warning(f"Advanced RAG failed ({str(e)}), using basic text processing")
                     st.session_state.conversation_chain = "basic"
-                    st.success(f"✅ Successfully processed {len(uploaded_files)} PDFs with basic text extraction!")
+                    st.success(
+                        f"✅ Successfully processed {len(uploaded_files)} PDFs with basic text extraction!"
+                    )
             else:
                 # Basic mode without vector stores
                 st.session_state.conversation_chain = "basic"
