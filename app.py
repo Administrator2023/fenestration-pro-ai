@@ -184,12 +184,22 @@ def create_llm(api_key: str, model_name: str):
 def create_conversation_chain(vectorstore, api_key: str, model_name: str):
     llm = create_llm(api_key, model_name)
     memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-    return ConversationalRetrievalChain.from_llm(
-        llm=llm,
-        retriever=vectorstore.as_retriever(search_kwargs={"k": 8}),
-        memory=memory,
-        return_source_documents=True,
-    )
+    # Prefer explicit output_key for memory-compatible chaining; fallback for older versions
+    try:
+        return ConversationalRetrievalChain.from_llm(
+            llm=llm,
+            retriever=vectorstore.as_retriever(search_kwargs={"k": 8}),
+            memory=memory,
+            return_source_documents=True,
+            output_key="answer",
+        )
+    except TypeError:
+        return ConversationalRetrievalChain.from_llm(
+            llm=llm,
+            retriever=vectorstore.as_retriever(search_kwargs={"k": 8}),
+            memory=memory,
+            return_source_documents=True,
+        )
 
 def load_persistent_vectorstore(api_key: str):
     """Try to load a persisted vector store from disk."""
