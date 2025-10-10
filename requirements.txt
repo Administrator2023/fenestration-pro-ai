@@ -11,3 +11,4 @@ langchain-text-splitters>=0.2.2,<0.3
 # Prefer Chroma for persistent vector DB; FAISS as lightweight fallback
 chromadb>=0.5.0,<0.6
 faiss-cpu>=1.7.4,<2
+pandas>=2.2.0,<3

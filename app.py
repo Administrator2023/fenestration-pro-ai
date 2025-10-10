@@ -468,6 +468,17 @@ def process_pdfs(uploaded_files, api_key):
                         f"✅ Successfully processed {len(uploaded_files)} PDFs and updated the persistent knowledge base!"
                     )
 
+                    # Log ingested documents in project records
+                    project = get_selected_project()
+                    docs_log = load_json_collection(project, "ingested_docs")
+                    for doc in processed_docs:
+                        docs_log.append({
+                            "name": doc['name'],
+                            "chunks": doc['chunks'],
+                            "ingested_at": datetime.now().isoformat(),
+                        })
+                    save_json_collection(project, "ingested_docs", docs_log)
+
                 except Exception as e:
                     st.warning(f"Advanced RAG failed ({str(e)}), using basic text processing")
                     st.session_state.conversation_chain = "basic"
@@ -1026,6 +1037,197 @@ if prompt := st.chat_input("Ask a question or describe an action..."):
         meta_prefix = "[" + ", ".join(meta) + "]\n\n"
     st.session_state.messages.append({"role": "assistant", "content": meta_prefix + assistant_response})
     # Avoid rerun calls to prevent AttributeError in certain hosting environments
+
+# PM Tabs: RFIs, Submittals, Schedule, Documents, Contacts, Reports
+st.markdown("---")
+st.subheader("🗂️ Project Management")
+tab_rfis, tab_submittals, tab_schedule, tab_documents, tab_contacts, tab_reports = st.tabs([
+    "RFIs", "Submittals", "Schedule", "Documents", "Contacts", "Reports"
+])
+
+with tab_rfis:
+    st.markdown("#### RFIs")
+    with st.form("rfi_form"):
+        rfi_subject = st.text_input("Subject")
+        rfi_question = st.text_area("Question / Clarification Needed", height=120)
+        rfi_due = st.date_input("Due date", value=date.today() + timedelta(days=7))
+        rfi_files = st.file_uploader("Attach files (optional)", accept_multiple_files=True)
+        submitted = st.form_submit_button("Create RFI")
+    if submitted and rfi_subject and rfi_question:
+        project = get_selected_project()
+        rfis = load_json_collection(project, "rfis")
+        attachments_meta = save_attachments(rfi_files, category="rfis") if rfi_files else []
+        rfis.append({
+            "id": uuid.uuid4().hex,
+            "subject": rfi_subject,
+            "question": rfi_question,
+            "due": rfi_due.isoformat(),
+            "status": "open",
+            "created": datetime.now().isoformat(),
+            "attachments": attachments_meta,
+        })
+        save_json_collection(project, "rfis", rfis)
+        st.success("RFI created")
+
+    # Show RFIs
+    project = get_selected_project()
+    rfis = load_json_collection(project, "rfis")
+    if rfis:
+        df = pd.DataFrame(rfis)
+        st.dataframe(df[["id", "subject", "due", "status"]], use_container_width=True)
+        with st.expander("Update RFI status"):
+            sel = st.selectbox("RFI", options=[f"{r['id']} — {r['subject'][:40]}" for r in rfis], index=0)
+            new_status = st.selectbox("Status", options=["open", "answered", "closed"], index=0)
+            if st.button("Update RFI"):
+                sel_id = sel.split(" — ")[0]
+                for r in rfis:
+                    if r["id"] == sel_id:
+                        r["status"] = new_status
+                        r["updated"] = datetime.now().isoformat()
+                        break
+                save_json_collection(project, "rfis", rfis)
+                st.success("RFI updated")
+    else:
+        st.info("No RFIs yet.")
+
+with tab_submittals:
+    st.markdown("#### Submittals")
+    with st.form("submittal_form"):
+        sub_title = st.text_input("Title")
+        sub_spec = st.text_input("Spec Section")
+        sub_status = st.selectbox("Status", ["draft", "submitted", "approved", "rejected"], index=0)
+        sub_files = st.file_uploader("Attach files (optional)", accept_multiple_files=True)
+        submitted = st.form_submit_button("Add Submittal")
+    if submitted and sub_title:
+        project = get_selected_project()
+        subs = load_json_collection(project, "submittals")
+        attachments_meta = save_attachments(sub_files, category="submittals") if sub_files else []
+        subs.append({
+            "id": uuid.uuid4().hex,
+            "title": sub_title,
+            "spec": sub_spec,
+            "status": sub_status,
+            "created": datetime.now().isoformat(),
+            "attachments": attachments_meta,
+        })
+        save_json_collection(project, "submittals", subs)
+        st.success("Submittal added")
+
+    # Show Submittals
+    project = get_selected_project()
+    subs = load_json_collection(project, "submittals")
+    if subs:
+        df = pd.DataFrame(subs)
+        st.dataframe(df[["id", "title", "spec", "status"]], use_container_width=True)
+        with st.expander("Update Submittal status"):
+            sel = st.selectbox("Submittal", options=[f"{s['id']} — {s['title'][:40]}" for s in subs], index=0)
+            new_status = st.selectbox("Status", ["draft", "submitted", "approved", "rejected"], index=0)
+            if st.button("Update Submittal"):
+                sel_id = sel.split(" — ")[0]
+                for s in subs:
+                    if s["id"] == sel_id:
+                        s["status"] = new_status
+                        s["updated"] = datetime.now().isoformat()
+                        break
+                save_json_collection(project, "submittals", subs)
+                st.success("Submittal updated")
+    else:
+        st.info("No submittals yet.")
+
+with tab_schedule:
+    st.markdown("#### Schedule / Milestones")
+    with st.form("milestone_form"):
+        ms_name = st.text_input("Milestone name")
+        ms_date = st.date_input("Date", value=date.today() + timedelta(days=14))
+        ms_submit = st.form_submit_button("Add Milestone")
+    if ms_submit and ms_name:
+        project = get_selected_project()
+        mss = load_json_collection(project, "milestones")
+        mss.append({
+            "id": uuid.uuid4().hex,
+            "name": ms_name,
+            "date": ms_date.isoformat(),
+            "created": datetime.now().isoformat(),
+        })
+        save_json_collection(project, "milestones", mss)
+        st.success("Milestone added")
+    # Show milestones
+    project = get_selected_project()
+    mss = load_json_collection(project, "milestones")
+    if mss:
+        df = pd.DataFrame(mss)
+        st.dataframe(df[["id", "name", "date"]], use_container_width=True)
+    else:
+        st.info("No milestones yet.")
+
+with tab_documents:
+    st.markdown("#### Documents")
+    project = get_selected_project()
+    # Ingested docs log
+    docs_log = load_json_collection(project, "ingested_docs")
+    if docs_log:
+        st.write("Ingested Knowledge Base Documents:")
+        df = pd.DataFrame(docs_log)
+        st.dataframe(df[["name", "chunks", "ingested_at"]], use_container_width=True)
+    else:
+        st.info("No ingested documents logged yet.")
+    # Uploaded files overview
+    uploads_dir = os.path.join(get_project_dir(project), "uploads")
+    if os.path.isdir(uploads_dir):
+        files = []
+        for root, _dirs, filenames in os.walk(uploads_dir):
+            for fn in filenames:
+                files.append({"file": fn, "path": os.path.join(root, fn)})
+        if files:
+            st.write("Uploaded Files:")
+            st.dataframe(pd.DataFrame(files), use_container_width=True)
+    
+with tab_contacts:
+    st.markdown("#### Contacts / Stakeholders")
+    with st.form("contact_form"):
+        c_name = st.text_input("Name")
+        c_role = st.text_input("Role")
+        c_email = st.text_input("Email")
+        c_org = st.text_input("Organization")
+        c_submit = st.form_submit_button("Add Contact")
+    if c_submit and c_name:
+        project = get_selected_project()
+        contacts = load_json_collection(project, "contacts")
+        contacts.append({
+            "id": uuid.uuid4().hex,
+            "name": c_name,
+            "role": c_role,
+            "email": c_email,
+            "org": c_org,
+            "created": datetime.now().isoformat(),
+        })
+        save_json_collection(project, "contacts", contacts)
+        st.success("Contact added")
+    # Show contacts
+    project = get_selected_project()
+    contacts = load_json_collection(project, "contacts")
+    if contacts:
+        st.dataframe(pd.DataFrame(contacts)[["id", "name", "role", "email", "org"]], use_container_width=True)
+    else:
+        st.info("No contacts yet.")
+
+with tab_reports:
+    st.markdown("#### Reports & Export")
+    project = get_selected_project()
+    snapshot = {
+        "project": project,
+        "generated_at": datetime.now().isoformat(),
+        "tasks": load_json_collection(project, "tasks"),
+        "rfis": load_json_collection(project, "rfis"),
+        "submittals": load_json_collection(project, "submittals"),
+        "milestones": load_json_collection(project, "milestones"),
+        "contacts": load_json_collection(project, "contacts"),
+        "ingested_docs": load_json_collection(project, "ingested_docs"),
+    }
+    json_str = json.dumps(snapshot, indent=2)
+    if create_download_link:
+        st.markdown(create_download_link(json_str, f"{project}_snapshot.json", "application/json"), unsafe_allow_html=True)
+    st.download_button("Download JSON", data=json_str, file_name=f"{project}_snapshot.json", mime="application/json")
 
 # Footer
 st.markdown("---")
