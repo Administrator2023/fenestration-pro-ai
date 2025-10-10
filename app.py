@@ -203,12 +203,24 @@ with st.sidebar:
         if st.button("🔁 Reload Knowledge", help="Load persisted knowledge base from disk"):
             if RAG_AVAILABLE and api_key:
                 try:
-                    vs = None
-                    vs = None
-                    vs = None
+                    vs = load_persistent_vectorstore(api_key)
+                    if vs is not None:
+                        st.session_state.vectorstore = vs
+                        st.session_state.conversation_chain = create_conversation_chain(
+                            vs, api_key, st.session_state.get("selected_model", "gpt-4o-mini")
+                        )
+                        st.success("Reloaded knowledge base from disk")
+                    else:
+                        st.warning("No persisted knowledge found to load")
+                except Exception as e:
+                    st.error(f"Failed to reload knowledge: {str(e)}")
+            try:
+                st.rerun()
+            except AttributeError:
+                try:
+                    st.experimental_rerun()
                 except Exception:
                     pass
-            st.experimental_rerun()
     with col_k2:
         if st.button("🧹 Clear Knowledge", help="Delete persisted vector stores from disk"):
             try:
