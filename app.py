@@ -449,6 +449,20 @@ with st.sidebar:
         st.success("✅ API Key loaded from secrets")
     
     st.markdown("---")
+    # Admin authentication
+    if "is_admin" not in st.session_state:
+        st.session_state.is_admin = False
+    is_admin_checked = st.checkbox("I am Admin", value=st.session_state.is_admin)
+    admin_pw_ok = False
+    if is_admin_checked:
+        admin_secret = st.secrets.get("ADMIN_PASSWORD", os.getenv("ADMIN_PASSWORD", ""))
+        entered_pw = st.text_input("Admin password", type="password")
+        admin_pw_ok = bool(admin_secret) and entered_pw == admin_secret
+        st.session_state.is_admin = admin_pw_ok
+        if admin_pw_ok:
+            st.success("Admin authenticated")
+        else:
+            st.info("Enter admin password to manage knowledge base")
     
     # Model selection
     model_options = [
@@ -509,24 +523,24 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # File uploader
-    uploaded_files = st.file_uploader(
-        "📎 Upload PDF Documents",
-        type=['pdf'],
-        accept_multiple_files=True,
-        help="Upload PDF documents to analyze and learn from"
-    )
-    
-    if uploaded_files:
-        st.success(f"📄 {len(uploaded_files)} file(s) uploaded!")
-        
-        if st.button("🧠 Process & Learn from PDFs", type="primary"):
-            if RAG_AVAILABLE and api_key:
-                process_pdfs(uploaded_files, api_key)
-            elif not api_key:
-                st.error("Please add your OpenAI API key first!")
-            else:
-                st.error("RAG capabilities not available. Please check dependencies.")
+    # Admin-only knowledge ingestion
+    uploaded_files = None
+    if st.session_state.is_admin:
+        uploaded_files = st.file_uploader(
+            "📎 Upload PDF Documents (Admin)",
+            type=['pdf'],
+            accept_multiple_files=True,
+            help="Upload PDF documents to analyze and learn from (persisted to knowledge base)"
+        )
+        if uploaded_files:
+            st.success(f"📄 {len(uploaded_files)} file(s) uploaded!")
+            if st.button("🧠 Process & Learn from PDFs", type="primary"):
+                if RAG_AVAILABLE and api_key:
+                    process_pdfs(uploaded_files, api_key)
+                elif not api_key:
+                    st.error("Please add your OpenAI API key first!")
+                else:
+                    st.error("RAG capabilities not available. Please check dependencies.")
     
     # Show processed documents
     if st.session_state.processed_docs:
@@ -536,12 +550,10 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("### 🧠 AI Status")
-    if st.session_state.conversation_chain:
-        st.success("✅ Knowledge Base Active")
-        st.info("I can now answer questions from your documents!")
+    if st.session_state.vectorstore is not None:
+        st.success("✅ Knowledge Base Active (persisted)")
     else:
-        st.warning("⚠️ Basic Mode")
-        st.info("Upload & process PDFs for document-specific answers")
+        st.warning("⚠️ Knowledge Base inactive - load or ingest documents")
     
     st.markdown("### 📊 Stats")
     if AnalyticsManager:
@@ -779,8 +791,17 @@ for message in st.session_state.messages:
         st.markdown(f'<div class="chat-message assistant-message"><strong>🤖 Fenestration Pro AI</strong><br>{message["content"]}</div>', 
                    unsafe_allow_html=True)
 
+# Client-side assistant area with email attachment metadata
+st.markdown("---")
+st.subheader("📨 Client Assistant")
+col_e1, col_e2 = st.columns(2)
+with col_e1:
+    client_email = st.text_input("Client Email (optional)", help="Attach an email to this conversation")
+with col_e2:
+    ticket_id = st.text_input("Ticket/Project ID (optional)")
+
 # Chat input
-if prompt := st.chat_input("Ask about fenestration, windows, doors, or upload a PDF..."):
+if prompt := st.chat_input("Ask a question or describe an action..."):
     # Add user message
     st.session_state.messages.append({"role": "user", "content": prompt})
     
@@ -792,7 +813,7 @@ if prompt := st.chat_input("Ask about fenestration, windows, doors, or upload a 
                 if st.session_state.conversation_chain and st.session_state.conversation_chain != "basic" and RAG_AVAILABLE:
                     # Use advanced RAG system with document knowledge
                     result = st.session_state.conversation_chain({
-                        "question": prompt
+                        "question": prompt,
                     })
                     
                     assistant_response = result["answer"]
@@ -883,8 +904,16 @@ if prompt := st.chat_input("Ask about fenestration, windows, doors, or upload a 
         else:
             assistant_response = "Please add your OpenAI API key in the sidebar to enable AI responses."
     
-    # Add assistant response
-    st.session_state.messages.append({"role": "assistant", "content": assistant_response})
+    # Add assistant response and optionally append metadata for email/ticket
+    meta_prefix = ""
+    if client_email or ticket_id:
+        meta = []
+        if client_email:
+            meta.append(f"Email: {client_email}")
+        if ticket_id:
+            meta.append(f"Ticket: {ticket_id}")
+        meta_prefix = "[" + ", ".join(meta) + "]\n\n"
+    st.session_state.messages.append({"role": "assistant", "content": meta_prefix + assistant_response})
     # Avoid rerun calls to prevent AttributeError in certain hosting environments
 
 # Footer
