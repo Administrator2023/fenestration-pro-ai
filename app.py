@@ -1271,13 +1271,14 @@ def get_oauth_url():
     }
     
     # BQE Core OAuth authorization endpoint
-    auth_endpoint = "https://apps.bqecore.com/identity/connect/authorize"
+    # Try the base domain with OAuth path
+    auth_endpoint = "https://api.bqecore.com/oauth/authorize"
     return f"{auth_endpoint}?{urlencode(params)}"
 
 def exchange_code_for_token(code):
     """Exchange authorization code for access token"""
     # BQE Core token endpoint
-    token_endpoint = "https://apps.bqecore.com/identity/connect/token"
+    token_endpoint = "https://api.bqecore.com/oauth/token"
     
     data = {
         "grant_type": "authorization_code",
@@ -1305,7 +1306,7 @@ def refresh_access_token():
         return None
     
     # BQE Core token endpoint
-    token_endpoint = "https://apps.bqecore.com/identity/connect/token"
+    token_endpoint = "https://api.bqecore.com/oauth/token"
     
     data = {
         "grant_type": "refresh_token",
@@ -1365,6 +1366,20 @@ with tab_bqe:
     # OAuth Connection Section
     if not st.session_state.bqe_token:
         st.info("🔐 Connect to BQE Core using OAuth 2.0")
+        
+        st.warning("""
+        ⚠️ **OAuth Endpoint Configuration Needed**
+        
+        The OAuth authorization URL needs to be configured with the correct BQE Core endpoint.
+        Please check your BQE Core OAuth app settings to find the correct authorization URL.
+        
+        Common OAuth URLs might be:
+        - `https://your-company.bqecore.com/oauth/authorize`
+        - `https://login.bqecore.com/oauth/authorize`
+        - `https://auth.bqe.com/authorize`
+        
+        You can update the endpoint in Advanced Settings below.
+        """)
         
         with st.expander("ℹ️ How OAuth works"):
             st.markdown("""
