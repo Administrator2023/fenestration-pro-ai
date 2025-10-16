@@ -1270,14 +1270,14 @@ def get_oauth_url():
         "state": state
     }
     
-    # BQE OAuth authorization endpoint - using apps.bqe.com based on client ID format
-    auth_endpoint = "https://apps.bqe.com/oauth/authorize"
+    # BQE OAuth authorization endpoint
+    auth_endpoint = "https://api.bqecore.com/identity/connect/authorize"
     return f"{auth_endpoint}?{urlencode(params)}"
 
 def exchange_code_for_token(code):
     """Exchange authorization code for access token"""
-    # BQE token endpoint - using apps.bqe.com based on client ID format
-    token_endpoint = "https://apps.bqe.com/oauth/token"
+    # BQE token endpoint - using bqecore.com
+    token_endpoint = "https://bqecore.com/oauth/token"
     
     data = {
         "grant_type": "authorization_code",
@@ -1304,8 +1304,8 @@ def refresh_access_token():
     if not st.session_state.get("bqe_refresh_token"):
         return None
     
-    # BQE token endpoint - using apps.bqe.com based on client ID format
-    token_endpoint = "https://apps.bqe.com/oauth/token"
+    # BQE token endpoint - using bqecore.com
+    token_endpoint = "https://bqecore.com/oauth/token"
     
     data = {
         "grant_type": "refresh_token",
