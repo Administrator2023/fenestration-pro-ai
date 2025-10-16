@@ -1,4 +1,3 @@
-# Get the first part of the file (before BQE tab)
 import streamlit as st
 import os
 import tempfile
@@ -10,6 +9,13 @@ from pathlib import Path
 import pandas as pd
 import logging
 import requests
+
+# Import BQE OAuth helper
+try:
+    from bqe_oauth import BQEOAuth, init_oauth_session, handle_oauth_callback, is_token_valid
+    BQE_OAUTH_AVAILABLE = True
+except ImportError:
+    BQE_OAUTH_AVAILABLE = False
 
 # Reduce noisy Chroma PostHog errors and disable telemetry via env
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
@@ -613,11 +619,10 @@ with st.sidebar:
     with col_k2:
         if st.button("🧹 Clear Knowledge", help="Delete persisted vector stores from disk"):
             try:
-                persist_dir, faiss_dir = get_kb_dirs_for_current_project()
-                if os.path.isdir(persist_dir):
-                    shutil.rmtree(persist_dir)
-                if os.path.isdir(faiss_dir):
-                    shutil.rmtree(faiss_dir)
+                if os.path.isdir(PERSIST_DIR):
+                    shutil.rmtree(PERSIST_DIR)
+                if os.path.isdir(FAISS_DIR):
+                    shutil.rmtree(FAISS_DIR)
                 st.session_state.vectorstore = None
                 st.session_state.conversation_chain = None
                 st.success("Cleared knowledge base from disk")
@@ -704,20 +709,19 @@ def create_conversation_chain(vectorstore, api_key: str, model_name: str):
 def load_persistent_vectorstore(api_key: str):
     """Try to load a persisted vector store from disk."""
     embeddings = get_embeddings(api_key)
-    persist_dir, faiss_dir = get_kb_dirs_for_current_project()
     # Prefer Chroma if present
     try:
-        if os.path.isdir(persist_dir) and os.listdir(persist_dir):
+        if os.path.isdir(PERSIST_DIR) and os.listdir(PERSIST_DIR):
             try:
-                return Chroma(persist_directory=persist_dir, embedding_function=embeddings)
+                return Chroma(persist_directory=PERSIST_DIR, embedding_function=embeddings)
             except TypeError:
-                return Chroma(persist_directory=persist_dir, embedding=embeddings)
+                return Chroma(persist_directory=PERSIST_DIR, embedding=embeddings)
     except Exception:
         pass
     # Fallback to FAISS
     try:
-        if os.path.isdir(faiss_dir):
-            return FAISS.load_local(faiss_dir, embeddings, allow_dangerous_deserialization=True)
+        if os.path.isdir(FAISS_DIR):
+            return FAISS.load_local(FAISS_DIR, embeddings, allow_dangerous_deserialization=True)
     except Exception:
         pass
     return None
@@ -832,13 +836,13 @@ def process_pdfs(uploaded_files, api_key):
                             vectorstore = Chroma.from_documents(
                                 documents=chunks,
                                 embedding=embeddings,
-                                persist_directory=persist_dir,
+                                persist_directory=PERSIST_DIR,
                             )
                         except TypeError:
                             vectorstore = Chroma.from_documents(
                                 documents=chunks,
                                 embedding_function=embeddings,
-                                persist_directory=persist_dir,
+                                persist_directory=PERSIST_DIR,
                             )
                         # Ensure persisted
                         try:
@@ -849,7 +853,7 @@ def process_pdfs(uploaded_files, api_key):
                         # Fallback to FAISS saved locally
                         vectorstore = FAISS.from_documents(chunks, embeddings)
                         try:
-                            vectorstore.save_local(faiss_dir)
+                            vectorstore.save_local(FAISS_DIR)
                         except Exception:
                             pass
 
@@ -1252,7 +1256,6 @@ with tab_reports:
         st.markdown(create_download_link(json_str, f"{project}_snapshot.json", "application/json"), unsafe_allow_html=True)
     st.download_button("Download JSON", data=json_str, file_name=f"{project}_snapshot.json", mime="application/json")
 
-# Simple BQE tab
 with tab_bqe:
     st.markdown("#### BQE Core Integration")
     
@@ -1263,156 +1266,337 @@ with tab_bqe:
         # Use hardcoded API token by default from secrets or fallback
         st.session_state.bqe_token = st.secrets.get("BQE_API_TOKEN", "qiXSQ2uKoeF9b5M7bOKtRYNpBxBaVw1c955M0fFU_ldZ2cjovtMSlkbT28aJaBPl")
     
-    # Use the hardcoded credentials
+    # Use the hardcoded token
     bqe_token = st.session_state.bqe_token
     bqe_base_url = st.session_state.bqe_base_url
     
-    # Show connection status
-    st.info("🔌 BQE Core integration is configured with default credentials")
+    if auth_method == "oauth" and BQE_OAUTH_AVAILABLE:
+        # OAuth Configuration
+        st.markdown("##### OAuth Configuration")
+        
+        # Show current OAuth status
+        if is_token_valid():
+            st.success("✅ Connected to BQE Core via OAuth")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🔄 Refresh Token"):
+                    if st.session_state.bqe_refresh_token and st.session_state.bqe_client_secret:
+                        try:
+                            oauth = BQEOAuth(
+                                client_id=st.session_state.bqe_client_id,
+                                redirect_uri="https://fenestrationpro.streamlit.app/"
+                            )
+                            token_data = oauth.refresh_token(
+                                st.session_state.bqe_refresh_token,
+                                st.session_state.bqe_client_secret
+                            )
+                            st.session_state.bqe_access_token = token_data.get("access_token")
+                            st.session_state.bqe_refresh_token = token_data.get("refresh_token", st.session_state.bqe_refresh_token)
+                            expires_in = token_data.get("expires_in", 3600)
+                            st.session_state.bqe_token_expires = datetime.now() + timedelta(seconds=expires_in)
+                            st.success("Token refreshed successfully!")
+                        except Exception as e:
+                            st.error(f"Failed to refresh token: {str(e)}")
+            with col2:
+                if st.button("🚪 Disconnect"):
+                    st.session_state.bqe_access_token = None
+                    st.session_state.bqe_refresh_token = None
+                    st.session_state.bqe_token_expires = None
+                    st.info("Disconnected from BQE Core")
+        else:
+            # OAuth setup
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                client_secret = st.text_input(
+                    "Client Secret",
+                    type="password",
+                    value=st.session_state.get("bqe_client_secret", ""),
+                    help="Your BQE OAuth app client secret"
+                )
+                st.session_state.bqe_client_secret = client_secret
+            
+            with col2:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("🔐 Connect with BQE", type="primary"):
+                    if not client_secret:
+                        st.error("Please enter your Client Secret")
+                    else:
+                        oauth = BQEOAuth(
+                            client_id=st.session_state.bqe_client_id,
+                            redirect_uri="https://fenestrationpro.streamlit.app/"
+                        )
+                        auth_url, state = oauth.get_authorization_url()
+                        st.session_state.bqe_oauth_state = state
+                        
+                        # Show the authorization link
+                        st.markdown(f"[Click here to authorize with BQE Core]({auth_url})")
+                        st.info("After authorizing, you'll be redirected back here to complete the setup.")
+        
+        # Show OAuth app info
+        with st.expander("ℹ️ OAuth App Information"):
+            st.markdown(f"""
+            **Client ID**: `{st.session_state.bqe_client_id}`  
+            **Redirect URI**: `https://fenestrationpro.streamlit.app/`  
+            **Scopes**: openid, profile, email, offline_access, api
+            
+            To get your Client Secret:
+            1. Log into BQE Core
+            2. Go to your OAuth app settings
+            3. Copy the Client Secret
+            """)
     
-    # Action buttons
+    else:
+        # API Token Configuration
+        st.markdown("##### API Token Configuration")
+        
+        bqe_token = st.text_input(
+            "BQE Core API Token", 
+            value=st.session_state.bqe_token,
+            type="password",
+            help="Your BQE Core API authentication token. Get it from your BQE Core account settings.",
+            placeholder="Enter your BQE Core API token"
+        )
+        st.session_state.bqe_token = bqe_token
+        
+        # Show sample token format
+        with st.expander("ℹ️ API Token Help"):
+            st.markdown("""
+            Your BQE Core API token should look like:
+            ```
+            qiXSQ2uKoeF9b5M7bOKtRYNpBxBaVw1c955M0fFU_ldZ2cjovtMSlkbT28aJaBPl
+            ```
+            
+            To get your API token:
+            1. Log into your BQE Core account
+            2. Go to Account Settings → API Access
+            3. Generate or copy your API token
+            """)
+    
+    # Base URL Configuration (for both methods)
+    st.markdown("##### API Configuration")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        bqe_base_url = st.text_input(
+            "BQE Base URL", 
+            value=st.session_state.bqe_base_url,
+            help="Your BQE API endpoint URL"
+        )
+        st.session_state.bqe_base_url = bqe_base_url
+    
+    with col2:
+        st.markdown("<br>", unsafe_allow_html=True)  # Spacing
+        if st.button("Reset to Default"):
+            st.session_state.bqe_base_url = "https://api.bqecore.com/api"
+    
+    # Test Connection and Import
+    st.markdown("---")
     col1, col2 = st.columns(2)
-    
     with col1:
         if st.button("🔌 Test Connection", type="primary"):
-            with st.spinner("Testing BQE connection..."):
-                try:
-                    headers = {
-                        "Authorization": f"Bearer {bqe_token}",
-                        "Content-Type": "application/json",
-                        "Accept": "application/json"
-                    }
-                    # Test with BQE Core employee endpoint
-                    test_url = f"{bqe_base_url}/employee"
-                    response = requests.get(test_url, headers=headers, timeout=10)
-                    
-                    if response.status_code == 200:
-                        st.success("✅ Successfully connected to BQE Core!")
+            # Determine which token to use
+            if st.session_state.bqe_auth_method == "oauth" and BQE_OAUTH_AVAILABLE:
+                if not is_token_valid():
+                    st.error("Please connect with OAuth first")
+                else:
+                    token = st.session_state.bqe_access_token
+                    with st.spinner("Testing BQE connection..."):
                         try:
-                            data = response.json()
-                            with st.expander("Connection Details"):
-                                if isinstance(data, list) and len(data) > 0:
-                                    st.write(f"Found {len(data)} employees")
-                                    st.json(data[0] if len(data) > 0 else {})
+                            headers = {
+                                "Authorization": f"Bearer {token}",
+                                "Content-Type": "application/json",
+                                "Accept": "application/json"
+                            }
+                            # Test with BQE Core employee endpoint to verify connection
+                            test_url = f"{bqe_base_url}/employee"
+                            response = requests.get(test_url, headers=headers, timeout=10)
+                            
+                            if response.status_code == 200:
+                                st.success("✅ Successfully connected to BQE Core!")
+                                try:
+                                    data = response.json()
+                                    with st.expander("Connection Details"):
+                                        if isinstance(data, list) and len(data) > 0:
+                                            st.write(f"Found {len(data)} employees")
+                                            st.json(data[0])  # Show first employee as sample
+                                        else:
+                                            st.json(data)
+                                except:
+                                    st.info("Connected successfully")
+                            elif response.status_code == 401:
+                                st.error("❌ Authentication failed. Please check your credentials.")
+                                if st.session_state.bqe_auth_method == "oauth":
+                                    st.info("Try refreshing your OAuth token or reconnecting.")
                                 else:
-                                    st.json(data)
-                        except:
-                            st.info("Connected successfully")
-                    elif response.status_code == 401:
-                        st.error("❌ Authentication failed. The API token may be invalid or expired.")
-                        st.info("Please update the BQE_API_TOKEN in Streamlit secrets.")
-                    else:
-                        st.error(f"❌ Connection failed: {response.status_code}")
-                        if response.text:
-                            st.error(f"Response: {response.text[:200]}")
-                except requests.exceptions.RequestException as e:
-                    st.error(f"❌ Connection error: {str(e)}")
+                                    st.info("Make sure you're using a valid BQE Core API token.")
+                            else:
+                                st.error(f"❌ Connection failed: {response.status_code}")
+                                if response.text:
+                                    st.error(f"Response: {response.text[:200]}")
+                        except requests.exceptions.RequestException as e:
+                            st.error(f"❌ Connection error: {str(e)}")
+            else:
+                if not bqe_token:
+                    st.error("Please enter your BQE API token")
+                else:
+                    token = bqe_token
+                    with st.spinner("Testing BQE connection..."):
+                        try:
+                            headers = {
+                                "Authorization": f"Bearer {token}",
+                                "Content-Type": "application/json",
+                                "Accept": "application/json"
+                            }
+                            # Test with BQE Core employee endpoint to verify connection
+                            test_url = f"{bqe_base_url}/employee"
+                            response = requests.get(test_url, headers=headers, timeout=10)
+                            
+                            if response.status_code == 200:
+                                st.success("✅ Successfully connected to BQE Core!")
+                                try:
+                                    data = response.json()
+                                    with st.expander("Connection Details"):
+                                        if isinstance(data, list) and len(data) > 0:
+                                            st.write(f"Found {len(data)} employees")
+                                            st.json(data[0])  # Show first employee as sample
+                                        else:
+                                            st.json(data)
+                                except:
+                                    st.info("Connected successfully")
+                            elif response.status_code == 401:
+                                st.error("❌ Authentication failed. Please check your credentials.")
+                                if st.session_state.bqe_auth_method == "oauth":
+                                    st.info("Try refreshing your OAuth token or reconnecting.")
+                                else:
+                                    st.info("Make sure you're using a valid BQE Core API token.")
+                            else:
+                                st.error(f"❌ Connection failed: {response.status_code}")
+                                if response.text:
+                                    st.error(f"Response: {response.text[:200]}")
+                        except requests.exceptions.RequestException as e:
+                            st.error(f"❌ Connection error: {str(e)}")
     
     with col2:
         if st.button("📥 Import Projects & Contacts"):
-            with st.spinner("Importing data from BQE..."):
-                try:
-                    headers = {
-                        "Authorization": f"Bearer {bqe_token}",
-                        "Content-Type": "application/json",
-                        "Accept": "application/json"
-                    }
-                    
-                    imported_data = {
-                        "projects": 0,
-                        "contacts": 0
-                    }
-                    
-                    # Import Projects
+            # Determine which token to use
+            if st.session_state.bqe_auth_method == "oauth" and BQE_OAUTH_AVAILABLE:
+                if not is_token_valid():
+                    st.error("Please connect with OAuth first")
+                    continue_import = False
+                else:
+                    token = st.session_state.bqe_access_token
+                    continue_import = True
+            else:
+                if not bqe_token:
+                    st.error("Please enter your BQE API token")
+                    continue_import = False
+                else:
+                    token = bqe_token
+                    continue_import = True
+            
+            if continue_import:
+                with st.spinner("Importing data from BQE..."):
                     try:
-                        projects_url = f"{bqe_base_url}/project"
-                        response = requests.get(projects_url, headers=headers, timeout=10)
-                        if response.status_code == 200:
-                            bqe_projects = response.json()
-                            if isinstance(bqe_projects, list):
-                                projects_list = bqe_projects
-                            elif isinstance(bqe_projects, dict) and 'data' in bqe_projects:
-                                projects_list = bqe_projects['data']
-                            else:
-                                projects_list = []
-                            
-                            # Convert BQE Core projects to our format
-                            for bqe_project in projects_list:
-                                # BQE Core uses different field names
-                                project_name = bqe_project.get('projectName', bqe_project.get('name', f"BQE Project {bqe_project.get('projectID', bqe_project.get('id', 'Unknown'))}"))
-                                project_dir = get_project_dir(project_name)
-                                ensure_directory(project_dir)
-                                
-                                # Store project metadata with BQE Core fields
-                                project_meta = {
-                                    "bqe_id": bqe_project.get('projectID', bqe_project.get('id')),
-                                    "name": project_name,
-                                    "description": bqe_project.get('description', ''),
-                                    "client": bqe_project.get('clientName', ''),
-                                    "status": bqe_project.get('projectStatus', bqe_project.get('status', 'active')),
-                                    "imported_from_bqe": True,
-                                    "imported_at": datetime.now().isoformat()
-                                }
-                                
-                                # Save to project metadata
-                                meta_file = os.path.join(project_dir, "project_meta.json")
-                                with open(meta_file, 'w') as f:
-                                    json.dump(project_meta, f, indent=2)
-                                
-                                imported_data["projects"] += 1
-                    except Exception as e:
-                        st.warning(f"Failed to import projects: {str(e)}")
-                    
-                    # Import Contacts
-                    try:
-                        # BQE Core uses 'contact' endpoint
-                        contacts_url = f"{bqe_base_url}/contact"
-                        response = requests.get(contacts_url, headers=headers, timeout=10)
-                        if response.status_code == 200:
-                            bqe_contacts = response.json()
-                            if isinstance(bqe_contacts, list):
-                                contacts_list = bqe_contacts
-                            elif isinstance(bqe_contacts, dict) and 'data' in bqe_contacts:
-                                contacts_list = bqe_contacts['data']
-                            else:
-                                contacts_list = []
-                            
-                            # Add BQE contacts to current project
-                            project = get_selected_project()
-                            existing_contacts = load_json_collection(project, "contacts")
-                            
-                            for bqe_contact in contacts_list:
-                                # BQE Core uses different field names
-                                full_name = f"{bqe_contact.get('firstName', '')} {bqe_contact.get('lastName', '')}".strip()
-                                if not full_name:
-                                    full_name = bqe_contact.get('fullName', bqe_contact.get('name', 'Unknown'))
-                                
-                                contact = {
-                                    "id": uuid.uuid4().hex,
-                                    "bqe_id": bqe_contact.get('contactID', bqe_contact.get('id')),
-                                    "name": full_name,
-                                    "role": bqe_contact.get('title', ''),
-                                    "email": bqe_contact.get('email1', bqe_contact.get('email', '')),
-                                    "org": bqe_contact.get('companyName', bqe_contact.get('company', '')),
-                                    "phone": bqe_contact.get('mobilePhone', bqe_contact.get('phone1', bqe_contact.get('phone', ''))),
-                                    "imported_from_bqe": True,
-                                    "created": datetime.now().isoformat()
-                                }
-                                existing_contacts.append(contact)
-                                imported_data["contacts"] += 1
-                            
-                            save_json_collection(project, "contacts", existing_contacts)
-                    except Exception as e:
-                        st.warning(f"Failed to import contacts: {str(e)}")
-                    
-                    # Show results
-                    if imported_data["projects"] > 0 or imported_data["contacts"] > 0:
-                        st.success(f"✅ Imported {imported_data['projects']} projects and {imported_data['contacts']} contacts from BQE")
-                    else:
-                        st.warning("No data was imported. Please check your BQE API configuration.")
+                        headers = {
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type": "application/json",
+                            "Accept": "application/json"
+                        }
                         
-                except Exception as e:
-                    st.error(f"❌ Import failed: {str(e)}")
+                        imported_data = {
+                            "projects": 0,
+                            "contacts": 0
+                        }
+                        
+                        # Import Projects
+                        try:
+                            projects_url = f"{bqe_base_url}/project"
+                            response = requests.get(projects_url, headers=headers, timeout=10)
+                            if response.status_code == 200:
+                                bqe_projects = response.json()
+                                if isinstance(bqe_projects, list):
+                                    projects_list = bqe_projects
+                                elif isinstance(bqe_projects, dict) and 'data' in bqe_projects:
+                                    projects_list = bqe_projects['data']
+                                else:
+                                    projects_list = []
+                                
+                                # Convert BQE Core projects to our format
+                                for bqe_project in projects_list:
+                                    # BQE Core uses different field names
+                                    project_name = bqe_project.get('projectName', bqe_project.get('name', f"BQE Project {bqe_project.get('projectID', bqe_project.get('id', 'Unknown'))}"))
+                                    project_dir = get_project_dir(project_name)
+                                    ensure_directory(project_dir)
+                                    
+                                    # Store project metadata with BQE Core fields
+                                    project_meta = {
+                                        "bqe_id": bqe_project.get('projectID', bqe_project.get('id')),
+                                        "name": project_name,
+                                        "description": bqe_project.get('description', ''),
+                                        "client": bqe_project.get('clientName', ''),
+                                        "status": bqe_project.get('projectStatus', bqe_project.get('status', 'active')),
+                                        "imported_from_bqe": True,
+                                        "imported_at": datetime.now().isoformat()
+                                    }
+                                    
+                                    # Save to project metadata
+                                    meta_file = os.path.join(project_dir, "project_meta.json")
+                                    with open(meta_file, 'w') as f:
+                                        json.dump(project_meta, f, indent=2)
+                                    
+                                    imported_data["projects"] += 1
+                        except Exception as e:
+                            st.warning(f"Failed to import projects: {str(e)}")
+                        
+                        # Import Contacts
+                        try:
+                            # BQE Core uses 'contact' endpoint
+                            contacts_url = f"{bqe_base_url}/contact"
+                            response = requests.get(contacts_url, headers=headers, timeout=10)
+                            if response.status_code == 200:
+                                bqe_contacts = response.json()
+                                if isinstance(bqe_contacts, list):
+                                    contacts_list = bqe_contacts
+                                elif isinstance(bqe_contacts, dict) and 'data' in bqe_contacts:
+                                    contacts_list = bqe_contacts['data']
+                                else:
+                                    contacts_list = []
+                                
+                                # Add BQE contacts to current project
+                                project = get_selected_project()
+                                existing_contacts = load_json_collection(project, "contacts")
+                                
+                                for bqe_contact in contacts_list:
+                                    # BQE Core uses different field names
+                                    full_name = f"{bqe_contact.get('firstName', '')} {bqe_contact.get('lastName', '')}".strip()
+                                    if not full_name:
+                                        full_name = bqe_contact.get('fullName', bqe_contact.get('name', 'Unknown'))
+                                    
+                                    contact = {
+                                        "id": uuid.uuid4().hex,
+                                        "bqe_id": bqe_contact.get('contactID', bqe_contact.get('id')),
+                                        "name": full_name,
+                                        "role": bqe_contact.get('title', ''),
+                                        "email": bqe_contact.get('email1', bqe_contact.get('email', '')),
+                                        "org": bqe_contact.get('companyName', bqe_contact.get('company', '')),
+                                        "phone": bqe_contact.get('mobilePhone', bqe_contact.get('phone1', bqe_contact.get('phone', ''))),
+                                        "imported_from_bqe": True,
+                                        "created": datetime.now().isoformat()
+                                    }
+                                    existing_contacts.append(contact)
+                                    imported_data["contacts"] += 1
+                                
+                                save_json_collection(project, "contacts", existing_contacts)
+                        except Exception as e:
+                            st.warning(f"Failed to import contacts: {str(e)}")
+                        
+                        # Show results
+                        if imported_data["projects"] > 0 or imported_data["contacts"] > 0:
+                            st.success(f"✅ Imported {imported_data['projects']} projects and {imported_data['contacts']} contacts from BQE")
+                        else:
+                            st.warning("No data was imported. Please check your BQE API configuration.")
+                            
+                    except Exception as e:
+                        st.error(f"❌ Import failed: {str(e)}")
     
     # Show BQE sync status
     st.markdown("---")
@@ -1438,27 +1622,6 @@ with tab_bqe:
         display_cols = ["name", "role", "email", "org"]
         if all(col in df.columns for col in display_cols):
             st.dataframe(df[display_cols], use_container_width=True)
-    
-    # Advanced settings (collapsed by default)
-    with st.expander("⚙️ Advanced Settings"):
-        new_token = st.text_input(
-            "Override BQE API Token", 
-            value="",
-            type="password",
-            help="Leave blank to use default token"
-        )
-        if new_token:
-            st.session_state.bqe_token = new_token
-            st.success("Using custom API token")
-        
-        new_url = st.text_input(
-            "Override BQE Base URL",
-            value="",
-            help="Leave blank to use default URL"
-        )
-        if new_url:
-            st.session_state.bqe_base_url = new_url
-            st.success("Using custom base URL")
 
 # Footer
 st.markdown("---")
