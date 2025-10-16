@@ -1252,7 +1252,73 @@ with tab_reports:
         st.markdown(create_download_link(json_str, f"{project}_snapshot.json", "application/json"), unsafe_allow_html=True)
     st.download_button("Download JSON", data=json_str, file_name=f"{project}_snapshot.json", mime="application/json")
 
-# Simple BQE tab
+# BQE OAuth Helper Functions
+def get_oauth_url():
+    """Generate BQE OAuth authorization URL"""
+    import secrets
+    state = secrets.token_urlsafe(32)
+    st.session_state.oauth_state = state
+    
+    params = {
+        "response_type": "code",
+        "client_id": st.session_state.bqe_client_id,
+        "redirect_uri": "https://fenestrationpro.streamlit.app/",
+        "scope": "openid profile email offline_access api",
+        "state": state
+    }
+    from urllib.parse import urlencode
+    return f"https://api.bqecore.com/connect/authorize?{urlencode(params)}"
+
+def exchange_code_for_token(code):
+    """Exchange authorization code for access token"""
+    data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": "https://fenestrationpro.streamlit.app/",
+        "client_id": st.session_state.bqe_client_id,
+        "client_secret": st.session_state.bqe_client_secret
+    }
+    
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    
+    response = requests.post("https://api.bqecore.com/connect/token", data=data, headers=headers)
+    
+    if response.status_code == 200:
+        return response.json()
+    else:
+        st.error(f"Token exchange failed: {response.status_code} - {response.text}")
+        return None
+
+def refresh_access_token():
+    """Refresh the access token using refresh token"""
+    if not st.session_state.get("bqe_refresh_token"):
+        return None
+        
+    data = {
+        "grant_type": "refresh_token",
+        "refresh_token": st.session_state.bqe_refresh_token,
+        "client_id": st.session_state.bqe_client_id,
+        "client_secret": st.session_state.bqe_client_secret
+    }
+    
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    
+    response = requests.post("https://api.bqecore.com/connect/token", data=data, headers=headers)
+    
+    if response.status_code == 200:
+        token_data = response.json()
+        st.session_state.bqe_token = token_data.get("access_token", "")
+        if "refresh_token" in token_data:
+            st.session_state.bqe_refresh_token = token_data["refresh_token"]
+        return True
+    else:
+        return False
+
+# Simple BQE tab with OAuth
 with tab_bqe:
     st.markdown("#### BQE Core Integration")
     
@@ -1264,33 +1330,70 @@ with tab_bqe:
     if "bqe_client_id" not in st.session_state:
         st.session_state.bqe_client_id = "U2pwazJCTFbCq7Re6VkR31YQc48pcL_O.apps.bqe.com"
     if "bqe_client_secret" not in st.session_state:
-        # This is likely the OAuth client secret, not an API token
         st.session_state.bqe_client_secret = "qiXSQ2uKoeF9b5M7bOKtRYNpBxBaVw1c955M0fFU_ldZ2cjovtMSlkbT28aJaBPl"
+    if "bqe_refresh_token" not in st.session_state:
+        st.session_state.bqe_refresh_token = ""
     
-    # Manual token input
-    st.markdown("##### Enter BQE Core Access Token")
-    bqe_token = st.text_input(
-        "Access Token (not Client Secret)", 
-        value=st.session_state.bqe_token,
-        type="password",
-        help="Enter a valid BQE Core access token or personal API token"
-    )
-    st.session_state.bqe_token = bqe_token
+    # Check for OAuth callback
+    query_params = st.query_params
+    if "code" in query_params and "state" in query_params:
+        code = query_params["code"]
+        state = query_params["state"]
+        
+        # Verify state matches
+        if state == st.session_state.get("oauth_state"):
+            with st.spinner("Completing OAuth authentication..."):
+                token_data = exchange_code_for_token(code)
+                if token_data:
+                    st.session_state.bqe_token = token_data.get("access_token", "")
+                    st.session_state.bqe_refresh_token = token_data.get("refresh_token", "")
+                    st.success("✅ Successfully authenticated with BQE Core!")
+                    # Clear query params
+                    st.query_params.clear()
     
+    # OAuth Connection Section
+    if not st.session_state.bqe_token:
+        st.info("🔐 Connect to BQE Core using OAuth")
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.markdown("Click the button to authenticate with your BQE Core account")
+        
+        with col2:
+            if st.button("🔐 Connect with BQE", type="primary"):
+                auth_url = get_oauth_url()
+                st.markdown(f"""
+                <a href="{auth_url}" target="_self" style="
+                    display: inline-block;
+                    padding: 0.5rem 1rem;
+                    background: #667eea;
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 0.25rem;
+                    margin-top: 0.5rem;
+                ">Click here to authorize with BQE Core</a>
+                """, unsafe_allow_html=True)
+                st.info("You'll be redirected to BQE Core to log in, then back here.")
+    else:
+        st.success("✅ Connected to BQE Core via OAuth")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown(f"**Token**: `{st.session_state.bqe_token[:20]}...`")
+        with col2:
+            if st.button("🔄 Refresh Token"):
+                if refresh_access_token():
+                    st.success("Token refreshed!")
+                    st.rerun()
+                else:
+                    st.error("Failed to refresh token. Please reconnect.")
+        with col3:
+            if st.button("🚪 Disconnect"):
+                st.session_state.bqe_token = ""
+                st.session_state.bqe_refresh_token = ""
+                st.rerun()
+    
+    bqe_token = st.session_state.bqe_token
     bqe_base_url = st.session_state.bqe_base_url
-    
-    # Show connection status
-    st.warning("""
-    ⚠️ **BQE Core requires OAuth authentication**
-    
-    Your OAuth app is configured:
-    - Client ID: `U2pwazJCTFbCq7Re6VkR31YQc48pcL_O.apps.bqe.com`
-    - Redirect URI: `https://fenestrationpro.streamlit.app/`
-    
-    To connect:
-    1. You need to implement OAuth flow to get an access token
-    2. Or obtain a personal API token from your BQE Core account settings
-    """)
     
     # Action buttons
     col1, col2 = st.columns(2)
@@ -1321,8 +1424,9 @@ with tab_bqe:
                         except:
                             st.info("Connected successfully")
                     elif response.status_code == 401:
-                        st.error("❌ Authentication failed. The API token may be invalid or expired.")
-                        st.info("Please update the BQE_API_TOKEN in Streamlit secrets.")
+                        st.error("❌ Authentication failed. The access token may be invalid or expired.")
+                        if st.session_state.bqe_refresh_token:
+                            st.info("Try refreshing your token or reconnect with OAuth.")
                     else:
                         st.error(f"❌ Connection failed: {response.status_code}")
                         if response.text:
