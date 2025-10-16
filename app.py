@@ -1270,15 +1270,14 @@ def get_oauth_url():
         "state": state
     }
     
-    # BQE Core OAuth authorization endpoint
-    # Try the base domain with OAuth path
-    auth_endpoint = "https://api.bqecore.com/oauth/authorize"
+    # BQE OAuth authorization endpoint - using apps.bqe.com based on client ID format
+    auth_endpoint = "https://apps.bqe.com/oauth/authorize"
     return f"{auth_endpoint}?{urlencode(params)}"
 
 def exchange_code_for_token(code):
     """Exchange authorization code for access token"""
-    # BQE Core token endpoint
-    token_endpoint = "https://api.bqecore.com/oauth/token"
+    # BQE token endpoint - using apps.bqe.com based on client ID format
+    token_endpoint = "https://apps.bqe.com/oauth/token"
     
     data = {
         "grant_type": "authorization_code",
@@ -1305,8 +1304,8 @@ def refresh_access_token():
     if not st.session_state.get("bqe_refresh_token"):
         return None
     
-    # BQE Core token endpoint
-    token_endpoint = "https://api.bqecore.com/oauth/token"
+    # BQE token endpoint - using apps.bqe.com based on client ID format
+    token_endpoint = "https://apps.bqe.com/oauth/token"
     
     data = {
         "grant_type": "refresh_token",
@@ -1345,6 +1344,8 @@ with tab_bqe:
         st.session_state.bqe_client_secret = "qiXSQ2uKoeF9b5M7bOKtRYNpBxBaVw1c955M0fFU_ldZ2cjovtMSlkbT28aJaBPl"
     if "bqe_refresh_token" not in st.session_state:
         st.session_state.bqe_refresh_token = ""
+    if "bqe_auth_url" not in st.session_state:
+        st.session_state.bqe_auth_url = ""
     
     # Check for OAuth callback
     query_params = st.query_params
@@ -1368,18 +1369,31 @@ with tab_bqe:
         st.info("🔐 Connect to BQE Core using OAuth 2.0")
         
         st.warning("""
-        ⚠️ **OAuth Endpoint Configuration Needed**
+        ⚠️ **OAuth Configuration Issue**
         
-        The OAuth authorization URL needs to be configured with the correct BQE Core endpoint.
-        Please check your BQE Core OAuth app settings to find the correct authorization URL.
+        We're having trouble finding the correct BQE Core OAuth endpoints. 
         
-        Common OAuth URLs might be:
+        **Option 1: Manual Token Entry**
+        If you have a BQE Core access token, you can enter it directly below.
+        
+        **Option 2: Find OAuth URL**
+        Check your BQE Core OAuth app settings for the correct authorization URL.
+        Common patterns:
         - `https://your-company.bqecore.com/oauth/authorize`
         - `https://login.bqecore.com/oauth/authorize`
-        - `https://auth.bqe.com/authorize`
-        
-        You can update the endpoint in Advanced Settings below.
+        - `https://bqecore.com/oauth/authorize`
         """)
+        
+        # Manual token entry option
+        manual_token = st.text_input(
+            "Manual Access Token Entry",
+            type="password",
+            help="If you have a BQE Core access token, enter it here"
+        )
+        if manual_token:
+            st.session_state.bqe_token = manual_token
+            st.success("✅ Token saved! Click Test Connection to verify.")
+            st.rerun()
         
         with st.expander("ℹ️ How OAuth works"):
             st.markdown("""
@@ -1615,8 +1629,8 @@ with tab_bqe:
         - Redirect URI: `https://fenestrationpro.streamlit.app/`
         
         **OAuth Endpoints (BQE Core):**
-        - Authorization: `https://apps.bqecore.com/identity/connect/authorize`
-        - Token: `https://apps.bqecore.com/identity/connect/token`
+        - Authorization: `https://api.bqecore.com/oauth/authorize`
+        - Token: `https://api.bqecore.com/oauth/token`
         - API Base: `https://api.bqecore.com/api`
         
         **Current Token Status:**
