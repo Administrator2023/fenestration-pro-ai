@@ -1446,6 +1446,31 @@ with tab_bqe:
                             # Test with BQE Core employee endpoint to verify connection
                             test_url = f"{bqe_base_url}/employee"
                             response = requests.get(test_url, headers=headers, timeout=10)
+                            
+                            if response.status_code == 200:
+                                st.success("✅ Successfully connected to BQE Core!")
+                                try:
+                                    data = response.json()
+                                    with st.expander("Connection Details"):
+                                        if isinstance(data, list) and len(data) > 0:
+                                            st.write(f"Found {len(data)} employees")
+                                            st.json(data[0])  # Show first employee as sample
+                                        else:
+                                            st.json(data)
+                                except:
+                                    st.info("Connected successfully")
+                            elif response.status_code == 401:
+                                st.error("❌ Authentication failed. Please check your credentials.")
+                                if st.session_state.bqe_auth_method == "oauth":
+                                    st.info("Try refreshing your OAuth token or reconnecting.")
+                                else:
+                                    st.info("Make sure you're using a valid BQE Core API token.")
+                            else:
+                                st.error(f"❌ Connection failed: {response.status_code}")
+                                if response.text:
+                                    st.error(f"Response: {response.text[:200]}")
+                        except requests.exceptions.RequestException as e:
+                            st.error(f"❌ Connection error: {str(e)}")
             else:
                 if not bqe_token:
                     st.error("Please enter your BQE API token")
@@ -1461,19 +1486,7 @@ with tab_bqe:
                             # Test with BQE Core employee endpoint to verify connection
                             test_url = f"{bqe_base_url}/employee"
                             response = requests.get(test_url, headers=headers, timeout=10)
-                        
-                        if response.status_code == 200:
-                            st.success("✅ Successfully connected to BQE Core!")
-                            try:
-                                data = response.json()
-                                with st.expander("Connection Details"):
-                                    if isinstance(data, list) and len(data) > 0:
-                                        st.write(f"Found {len(data)} employees")
-                                        st.json(data[0])  # Show first employee as sample
-                                    else:
-                                        st.json(data)
-                            except:
-                                st.info("Connected successfully")
+                            
                             if response.status_code == 200:
                                 st.success("✅ Successfully connected to BQE Core!")
                                 try:
