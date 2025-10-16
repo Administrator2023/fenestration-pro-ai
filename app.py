@@ -1256,19 +1256,41 @@ with tab_reports:
 with tab_bqe:
     st.markdown("#### BQE Core Integration")
     
-    # Initialize session state for BQE with hardcoded credentials
+    # Initialize session state for BQE
     if "bqe_base_url" not in st.session_state:
         st.session_state.bqe_base_url = "https://api.bqecore.com/api"
     if "bqe_token" not in st.session_state:
-        # Use hardcoded API token by default from secrets or fallback
-        st.session_state.bqe_token = st.secrets.get("BQE_API_TOKEN", "qiXSQ2uKoeF9b5M7bOKtRYNpBxBaVw1c955M0fFU_ldZ2cjovtMSlkbT28aJaBPl")
+        st.session_state.bqe_token = ""
+    if "bqe_client_id" not in st.session_state:
+        st.session_state.bqe_client_id = "U2pwazJCTFbCq7Re6VkR31YQc48pcL_O.apps.bqe.com"
+    if "bqe_client_secret" not in st.session_state:
+        # This is likely the OAuth client secret, not an API token
+        st.session_state.bqe_client_secret = "qiXSQ2uKoeF9b5M7bOKtRYNpBxBaVw1c955M0fFU_ldZ2cjovtMSlkbT28aJaBPl"
     
-    # Use the hardcoded credentials
-    bqe_token = st.session_state.bqe_token
+    # Manual token input
+    st.markdown("##### Enter BQE Core Access Token")
+    bqe_token = st.text_input(
+        "Access Token (not Client Secret)", 
+        value=st.session_state.bqe_token,
+        type="password",
+        help="Enter a valid BQE Core access token or personal API token"
+    )
+    st.session_state.bqe_token = bqe_token
+    
     bqe_base_url = st.session_state.bqe_base_url
     
     # Show connection status
-    st.info("🔌 BQE Core integration is configured with default credentials")
+    st.warning("""
+    ⚠️ **BQE Core requires OAuth authentication**
+    
+    Your OAuth app is configured:
+    - Client ID: `U2pwazJCTFbCq7Re6VkR31YQc48pcL_O.apps.bqe.com`
+    - Redirect URI: `https://fenestrationpro.streamlit.app/`
+    
+    To connect:
+    1. You need to implement OAuth flow to get an access token
+    2. Or obtain a personal API token from your BQE Core account settings
+    """)
     
     # Action buttons
     col1, col2 = st.columns(2)
@@ -1440,16 +1462,19 @@ with tab_bqe:
             st.dataframe(df[display_cols], use_container_width=True)
     
     # Advanced settings (collapsed by default)
-    with st.expander("⚙️ Advanced Settings"):
-        new_token = st.text_input(
-            "Override BQE API Token", 
-            value="",
-            type="password",
-            help="Leave blank to use default token"
-        )
-        if new_token:
-            st.session_state.bqe_token = new_token
-            st.success("Using custom API token")
+    with st.expander("⚙️ Advanced Settings & OAuth Info"):
+        st.markdown("""
+        **OAuth Application Details:**
+        - Client ID: `U2pwazJCTFbCq7Re6VkR31YQc48pcL_O.apps.bqe.com`
+        - Client Secret: Hidden (stored securely)
+        - Redirect URI: `https://fenestrationpro.streamlit.app/`
+        
+        **To get an access token:**
+        1. Use BQE Core's OAuth flow (requires implementation)
+        2. Or get a personal API token from BQE Core settings
+        
+        **Note:** The string you provided appears to be the OAuth Client Secret, not an access token.
+        """)
         
         new_url = st.text_input(
             "Override BQE Base URL",
