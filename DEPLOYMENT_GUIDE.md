@@ -6,9 +6,11 @@ The BQE integration has been successfully added to the Fenestration Pro AI appli
 
 ### What's New:
 
-1. **BQE Tab** in Project Management section with:
-   - Base URL configuration (default: https://api.bqe.com/v1)
-   - API Token input (secure/password field)
+1. **BQE Core Tab** in Project Management section with:
+   - **Dual Authentication Methods**:
+     - OAuth 2.0 (Recommended) - Secure OAuth flow with refresh tokens
+     - API Token - Direct token authentication
+   - Base URL configuration (default: https://api.bqecore.com/api)
    - Test Connection functionality
    - Import Projects & Contacts feature
    - BQE sync status display
@@ -41,12 +43,21 @@ The BQE integration has been successfully added to the Fenestration Pro AI appli
 
 ### Using the BQE Integration:
 
+#### Option 1: OAuth 2.0 Authentication (Recommended)
 1. Navigate to the deployed app
-2. Go to "Project Management" section
-3. Click on the "BQE" tab
-4. Enter your BQE credentials:
-   - Keep the default Base URL or update if needed
-   - Enter your BQE API Token
+2. Go to "Project Management" → "BQE" tab
+3. Select "OAuth 2.0 (Recommended)"
+4. Enter your OAuth Client Secret
+5. Click "Connect with BQE"
+6. Authorize the app in BQE Core
+7. You'll be redirected back and authenticated
+8. Click "Import Projects & Contacts" to sync data
+
+#### Option 2: API Token Authentication
+1. Navigate to the deployed app
+2. Go to "Project Management" → "BQE" tab
+3. Select "API Token"
+4. Enter your BQE Core API Token
 5. Click "Test Connection" to verify
 6. Click "Import Projects & Contacts" to sync data
 
@@ -64,14 +75,26 @@ If the app doesn't update:
 3. Try manual reboot from the dashboard
 4. Verify all dependencies are compatible
 
+### BQE Core OAuth Application:
+
+The app is configured with:
+- **Client ID**: `U2pwazJCTFbCq7Re6VkR31YQc48pcL_O.apps.bqe.com`
+- **Redirect URI**: `https://fenestrationpro.streamlit.app/`
+- **Scopes**: openid, profile, email, offline_access, api
+
 ### API Endpoints:
 
-The integration is configured for standard BQE API v1 endpoints:
-- Account: `/account`
-- Projects: `/projects`
-- Contacts: `/contacts`
+The integration uses BQE Core API v1 endpoints:
+- Employee: `/employee` (for testing connection)
+- Projects: `/project`
+- Contacts: `/contact`
 
-If your BQE instance uses different endpoints, you can modify the Base URL in the app.
+### Required Secrets:
+
+For OAuth, you'll need to add your Client Secret in the app or Streamlit Cloud secrets:
+```toml
+BQE_CLIENT_SECRET = "your-oauth-client-secret"
+```
 
 ---
 
