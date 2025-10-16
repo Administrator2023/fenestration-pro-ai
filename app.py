@@ -1256,21 +1256,29 @@ with tab_reports:
 def get_oauth_url():
     """Generate BQE OAuth authorization URL"""
     import secrets
+    from urllib.parse import urlencode
+    
     state = secrets.token_urlsafe(32)
     st.session_state.oauth_state = state
     
+    # According to BQE Core docs, the correct OAuth flow parameters
     params = {
         "response_type": "code",
         "client_id": st.session_state.bqe_client_id,
         "redirect_uri": "https://fenestrationpro.streamlit.app/",
-        "scope": "openid profile email offline_access api",
+        "scope": "openid offline_access api",  # Updated scopes per BQE docs
         "state": state
     }
-    from urllib.parse import urlencode
-    return f"https://api.bqecore.com/connect/authorize?{urlencode(params)}"
+    
+    # BQE Core OAuth authorization endpoint
+    auth_endpoint = "https://apps.bqecore.com/identity/connect/authorize"
+    return f"{auth_endpoint}?{urlencode(params)}"
 
 def exchange_code_for_token(code):
     """Exchange authorization code for access token"""
+    # BQE Core token endpoint
+    token_endpoint = "https://apps.bqecore.com/identity/connect/token"
+    
     data = {
         "grant_type": "authorization_code",
         "code": code,
@@ -1283,7 +1291,7 @@ def exchange_code_for_token(code):
         "Content-Type": "application/x-www-form-urlencoded"
     }
     
-    response = requests.post("https://api.bqecore.com/connect/token", data=data, headers=headers)
+    response = requests.post(token_endpoint, data=data, headers=headers)
     
     if response.status_code == 200:
         return response.json()
@@ -1295,7 +1303,10 @@ def refresh_access_token():
     """Refresh the access token using refresh token"""
     if not st.session_state.get("bqe_refresh_token"):
         return None
-        
+    
+    # BQE Core token endpoint
+    token_endpoint = "https://apps.bqecore.com/identity/connect/token"
+    
     data = {
         "grant_type": "refresh_token",
         "refresh_token": st.session_state.bqe_refresh_token,
@@ -1307,7 +1318,7 @@ def refresh_access_token():
         "Content-Type": "application/x-www-form-urlencoded"
     }
     
-    response = requests.post("https://api.bqecore.com/connect/token", data=data, headers=headers)
+    response = requests.post(token_endpoint, data=data, headers=headers)
     
     if response.status_code == 200:
         token_data = response.json()
@@ -1353,7 +1364,22 @@ with tab_bqe:
     
     # OAuth Connection Section
     if not st.session_state.bqe_token:
-        st.info("🔐 Connect to BQE Core using OAuth")
+        st.info("🔐 Connect to BQE Core using OAuth 2.0")
+        
+        with st.expander("ℹ️ How OAuth works"):
+            st.markdown("""
+            1. Click **Connect with BQE** below
+            2. You'll be redirected to BQE Core login page
+            3. Log in with your BQE Core credentials
+            4. Authorize this app to access your BQE data
+            5. You'll be redirected back here automatically
+            6. The app will exchange the authorization code for an access token
+            
+            **Your OAuth App Details:**
+            - Client ID: `U2pwazJCTFbCq7Re6VkR31YQc48pcL_O.apps.bqe.com`
+            - Redirect URI: `https://fenestrationpro.streamlit.app/`
+            """)
+        
         col1, col2 = st.columns([2, 1])
         
         with col1:
