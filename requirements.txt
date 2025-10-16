@@ -2,6 +2,7 @@
 streamlit==1.50.0
 openai>=1.30.0,<2
 PyPDF2>=3.0.1,<4
+requests>=2.31.0,<3
 
 # RAG + persistence stack (kept optional by import guards in app.py)
 langchain>=0.2.11,<0.3

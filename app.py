@@ -8,6 +8,7 @@ from datetime import datetime, date, timedelta
 from pathlib import Path
 import pandas as pd
 import logging
+import requests
 
 # Reduce noisy Chroma PostHog errors and disable telemetry via env
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
@@ -1060,8 +1061,8 @@ if prompt := st.chat_input("Ask a question or describe an action..."):
 # PM Tabs: RFIs, Submittals, Schedule, Documents, Contacts, Reports
 st.markdown("---")
 st.subheader("🗂️ Project Management")
-tab_rfis, tab_submittals, tab_schedule, tab_documents, tab_contacts, tab_reports = st.tabs([
-    "RFIs", "Submittals", "Schedule", "Documents", "Contacts", "Reports"
+tab_rfis, tab_submittals, tab_schedule, tab_documents, tab_contacts, tab_reports, tab_bqe = st.tabs([
+    "RFIs", "Submittals", "Schedule", "Documents", "Contacts", "Reports", "BQE"
 ])
 
 with tab_rfis:
@@ -1247,6 +1248,190 @@ with tab_reports:
     if create_download_link:
         st.markdown(create_download_link(json_str, f"{project}_snapshot.json", "application/json"), unsafe_allow_html=True)
     st.download_button("Download JSON", data=json_str, file_name=f"{project}_snapshot.json", mime="application/json")
+
+with tab_bqe:
+    st.markdown("#### BQE Integration")
+    
+    # BQE configuration in session state
+    if "bqe_base_url" not in st.session_state:
+        st.session_state.bqe_base_url = "https://api.bqe.com/v1"
+    if "bqe_token" not in st.session_state:
+        st.session_state.bqe_token = ""
+    
+    # BQE Settings
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        bqe_base_url = st.text_input(
+            "BQE Base URL", 
+            value=st.session_state.bqe_base_url,
+            help="Your BQE API endpoint URL"
+        )
+        st.session_state.bqe_base_url = bqe_base_url
+    
+    with col2:
+        st.markdown("<br>", unsafe_allow_html=True)  # Spacing
+        if st.button("Reset to Default"):
+            st.session_state.bqe_base_url = "https://api.bqe.com/v1"
+    
+    bqe_token = st.text_input(
+        "BQE API Token", 
+        value=st.session_state.bqe_token,
+        type="password",
+        help="Your BQE API authentication token"
+    )
+    st.session_state.bqe_token = bqe_token
+    
+    # Test Connection
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔌 Test Connection", type="primary"):
+            if not bqe_token:
+                st.error("Please enter your BQE API token")
+            else:
+                with st.spinner("Testing BQE connection..."):
+                    try:
+                        headers = {
+                            "Authorization": f"Bearer {bqe_token}",
+                            "Content-Type": "application/json"
+                        }
+                        # Test with a simple endpoint (adjust based on BQE API)
+                        test_url = f"{bqe_base_url}/account"
+                        response = requests.get(test_url, headers=headers, timeout=10)
+                        
+                        if response.status_code == 200:
+                            st.success("✅ Successfully connected to BQE!")
+                            account_data = response.json()
+                            with st.expander("Account Details"):
+                                st.json(account_data)
+                        else:
+                            st.error(f"❌ Connection failed: {response.status_code} - {response.text}")
+                    except requests.exceptions.RequestException as e:
+                        st.error(f"❌ Connection error: {str(e)}")
+    
+    with col2:
+        if st.button("📥 Import Projects & Contacts"):
+            if not bqe_token:
+                st.error("Please enter your BQE API token")
+            else:
+                with st.spinner("Importing data from BQE..."):
+                    try:
+                        headers = {
+                            "Authorization": f"Bearer {bqe_token}",
+                            "Content-Type": "application/json"
+                        }
+                        
+                        imported_data = {
+                            "projects": 0,
+                            "contacts": 0
+                        }
+                        
+                        # Import Projects
+                        try:
+                            projects_url = f"{bqe_base_url}/projects"
+                            response = requests.get(projects_url, headers=headers, timeout=10)
+                            if response.status_code == 200:
+                                bqe_projects = response.json()
+                                if isinstance(bqe_projects, list):
+                                    projects_list = bqe_projects
+                                elif isinstance(bqe_projects, dict) and 'data' in bqe_projects:
+                                    projects_list = bqe_projects['data']
+                                else:
+                                    projects_list = []
+                                
+                                # Convert BQE projects to our format
+                                for bqe_project in projects_list:
+                                    project_name = bqe_project.get('name', f"BQE Project {bqe_project.get('id', 'Unknown')}")
+                                    project_dir = get_project_dir(project_name)
+                                    ensure_directory(project_dir)
+                                    
+                                    # Store project metadata
+                                    project_meta = {
+                                        "bqe_id": bqe_project.get('id'),
+                                        "name": project_name,
+                                        "description": bqe_project.get('description', ''),
+                                        "status": bqe_project.get('status', 'active'),
+                                        "imported_from_bqe": True,
+                                        "imported_at": datetime.now().isoformat()
+                                    }
+                                    
+                                    # Save to project metadata
+                                    meta_file = os.path.join(project_dir, "project_meta.json")
+                                    with open(meta_file, 'w') as f:
+                                        json.dump(project_meta, f, indent=2)
+                                    
+                                    imported_data["projects"] += 1
+                        except Exception as e:
+                            st.warning(f"Failed to import projects: {str(e)}")
+                        
+                        # Import Contacts
+                        try:
+                            contacts_url = f"{bqe_base_url}/contacts"
+                            response = requests.get(contacts_url, headers=headers, timeout=10)
+                            if response.status_code == 200:
+                                bqe_contacts = response.json()
+                                if isinstance(bqe_contacts, list):
+                                    contacts_list = bqe_contacts
+                                elif isinstance(bqe_contacts, dict) and 'data' in bqe_contacts:
+                                    contacts_list = bqe_contacts['data']
+                                else:
+                                    contacts_list = []
+                                
+                                # Add BQE contacts to current project
+                                project = get_selected_project()
+                                existing_contacts = load_json_collection(project, "contacts")
+                                
+                                for bqe_contact in contacts_list:
+                                    contact = {
+                                        "id": uuid.uuid4().hex,
+                                        "bqe_id": bqe_contact.get('id'),
+                                        "name": bqe_contact.get('name', 'Unknown'),
+                                        "role": bqe_contact.get('title', ''),
+                                        "email": bqe_contact.get('email', ''),
+                                        "org": bqe_contact.get('company', ''),
+                                        "phone": bqe_contact.get('phone', ''),
+                                        "imported_from_bqe": True,
+                                        "created": datetime.now().isoformat()
+                                    }
+                                    existing_contacts.append(contact)
+                                    imported_data["contacts"] += 1
+                                
+                                save_json_collection(project, "contacts", existing_contacts)
+                        except Exception as e:
+                            st.warning(f"Failed to import contacts: {str(e)}")
+                        
+                        # Show results
+                        if imported_data["projects"] > 0 or imported_data["contacts"] > 0:
+                            st.success(f"✅ Imported {imported_data['projects']} projects and {imported_data['contacts']} contacts from BQE")
+                        else:
+                            st.warning("No data was imported. Please check your BQE API configuration.")
+                            
+                    except Exception as e:
+                        st.error(f"❌ Import failed: {str(e)}")
+    
+    # Show BQE sync status
+    st.markdown("---")
+    st.markdown("##### BQE Sync Status")
+    project = get_selected_project()
+    project_dir = get_project_dir(project)
+    meta_file = os.path.join(project_dir, "project_meta.json")
+    
+    if os.path.exists(meta_file):
+        with open(meta_file, 'r') as f:
+            project_meta = json.load(f)
+            if project_meta.get('imported_from_bqe'):
+                st.info(f"This project was imported from BQE on {project_meta.get('imported_at', 'Unknown date')}")
+                if project_meta.get('bqe_id'):
+                    st.text(f"BQE Project ID: {project_meta['bqe_id']}")
+    
+    # Show imported contacts with BQE flag
+    contacts = load_json_collection(project, "contacts")
+    bqe_contacts = [c for c in contacts if c.get('imported_from_bqe')]
+    if bqe_contacts:
+        st.markdown(f"##### BQE Contacts ({len(bqe_contacts)})")
+        df = pd.DataFrame(bqe_contacts)
+        display_cols = ["name", "role", "email", "org"]
+        if all(col in df.columns for col in display_cols):
+            st.dataframe(df[display_cols], use_container_width=True)
 
 # Footer
 st.markdown("---")
