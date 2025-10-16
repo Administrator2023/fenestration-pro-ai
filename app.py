@@ -1596,15 +1596,22 @@ with tab_bqe:
         st.markdown("""
         **OAuth Application Details:**
         - Client ID: `U2pwazJCTFbCq7Re6VkR31YQc48pcL_O.apps.bqe.com`
-        - Client Secret: Hidden (stored securely)
+        - Client Secret: Configured (hidden)
         - Redirect URI: `https://fenestrationpro.streamlit.app/`
         
-        **To get an access token:**
-        1. Use BQE Core's OAuth flow (requires implementation)
-        2. Or get a personal API token from BQE Core settings
+        **OAuth Endpoints (BQE Core):**
+        - Authorization: `https://apps.bqecore.com/identity/connect/authorize`
+        - Token: `https://apps.bqecore.com/identity/connect/token`
+        - API Base: `https://api.bqecore.com/api`
         
-        **Note:** The string you provided appears to be the OAuth Client Secret, not an access token.
+        **Current Token Status:**
         """)
+        if st.session_state.bqe_token:
+            st.success(f"✅ Access Token: `{st.session_state.bqe_token[:20]}...`")
+            if st.session_state.bqe_refresh_token:
+                st.success(f"✅ Refresh Token: `{st.session_state.bqe_refresh_token[:20]}...`")
+        else:
+            st.warning("❌ Not authenticated")
         
         new_url = st.text_input(
             "Override BQE Base URL",
