@@ -1271,13 +1271,21 @@ def get_oauth_url():
     }
     
     # BQE OAuth authorization endpoint
-    auth_endpoint = "https://api.bqecore.com/identity/connect/authorize"
+    # Use configured URL or default
+    if hasattr(st.session_state, 'bqe_auth_url') and st.session_state.bqe_auth_url:
+        auth_endpoint = st.session_state.bqe_auth_url
+    else:
+        # Default to core.bqe.com
+        auth_endpoint = "https://core.bqe.com/identity/connect/authorize"
     return f"{auth_endpoint}?{urlencode(params)}"
 
 def exchange_code_for_token(code):
     """Exchange authorization code for access token"""
     # BQE token endpoint
-    token_endpoint = "https://api.bqecore.com/identity/connect/token"
+    if hasattr(st.session_state, 'bqe_token_url') and st.session_state.bqe_token_url:
+        token_endpoint = st.session_state.bqe_token_url
+    else:
+        token_endpoint = "https://core.bqe.com/identity/connect/token"
     
     data = {
         "grant_type": "authorization_code",
@@ -1305,7 +1313,10 @@ def refresh_access_token():
         return None
     
     # BQE token endpoint
-    token_endpoint = "https://api.bqecore.com/identity/connect/token"
+    if hasattr(st.session_state, 'bqe_token_url') and st.session_state.bqe_token_url:
+        token_endpoint = st.session_state.bqe_token_url
+    else:
+        token_endpoint = "https://core.bqe.com/identity/connect/token"
     
     data = {
         "grant_type": "refresh_token",
@@ -1346,6 +1357,8 @@ with tab_bqe:
         st.session_state.bqe_refresh_token = ""
     if "bqe_auth_url" not in st.session_state:
         st.session_state.bqe_auth_url = ""
+    if "bqe_token_url" not in st.session_state:
+        st.session_state.bqe_token_url = ""
     
     # Check for OAuth callback
     query_params = st.query_params
@@ -1369,20 +1382,39 @@ with tab_bqe:
         st.info("🔐 Connect to BQE Core using OAuth 2.0")
         
         st.warning("""
-        ⚠️ **OAuth Configuration Issue**
+        ⚠️ **OAuth Configuration Required**
         
-        We're having trouble finding the correct BQE Core OAuth endpoints. 
+        The domain `apps.bqecore.com` in your Client ID cannot be resolved. 
         
-        **Option 1: Manual Token Entry**
-        If you have a BQE Core access token, you can enter it directly below.
+        **Option 1: Configure OAuth URL**
+        Enter the correct OAuth authorization URL from your BQE Core app settings below.
         
-        **Option 2: Find OAuth URL**
-        Check your BQE Core OAuth app settings for the correct authorization URL.
-        Common patterns:
-        - `https://your-company.bqecore.com/oauth/authorize`
-        - `https://login.bqecore.com/oauth/authorize`
-        - `https://bqecore.com/oauth/authorize`
+        **Option 2: Manual Token Entry**
+        If you have a BQE Core access token, you can enter it directly.
         """)
+        
+        # OAuth URL configuration
+        with st.expander("🔧 Configure OAuth URLs", expanded=True):
+            st.info("""
+            Based on your Client ID ending in `.apps.bqe.com`, you need to provide the correct OAuth URLs.
+            These URLs should be found in your BQE Core OAuth application settings.
+            """)
+            
+            oauth_base = st.text_input(
+                "OAuth Base URL",
+                value="https://",
+                help="Enter the base URL for OAuth (e.g., https://login.bqecore.com)"
+            )
+            
+            if oauth_base and oauth_base != "https://":
+                # Update the OAuth endpoints
+                st.session_state.bqe_auth_url = f"{oauth_base}/identity/connect/authorize"
+                st.session_state.bqe_token_url = f"{oauth_base}/identity/connect/token"
+                st.success(f"✅ OAuth URLs configured!")
+                st.markdown(f"""
+                **Authorization URL:** `{st.session_state.bqe_auth_url}`  
+                **Token URL:** `{st.session_state.bqe_token_url}`
+                """)
         
         # Manual token entry option
         manual_token = st.text_input(
