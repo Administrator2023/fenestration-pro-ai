@@ -1250,11 +1250,14 @@ with tab_reports:
     st.download_button("Download JSON", data=json_str, file_name=f"{project}_snapshot.json", mime="application/json")
 
 with tab_bqe:
-    st.markdown("#### BQE Integration")
+    st.markdown("#### BQE Core Integration")
+    
+    # Show API documentation link
+    st.info("📚 [BQE Core API Documentation](https://api-explorer.bqecore.com/docs/getting-started)")
     
     # BQE configuration in session state
     if "bqe_base_url" not in st.session_state:
-        st.session_state.bqe_base_url = "https://api.bqe.com/v1"
+        st.session_state.bqe_base_url = "https://api.bqecore.com/api"
     if "bqe_token" not in st.session_state:
         st.session_state.bqe_token = ""
     
@@ -1271,15 +1274,30 @@ with tab_bqe:
     with col2:
         st.markdown("<br>", unsafe_allow_html=True)  # Spacing
         if st.button("Reset to Default"):
-            st.session_state.bqe_base_url = "https://api.bqe.com/v1"
+            st.session_state.bqe_base_url = "https://api.bqecore.com/api"
     
     bqe_token = st.text_input(
-        "BQE API Token", 
+        "BQE Core API Token", 
         value=st.session_state.bqe_token,
         type="password",
-        help="Your BQE API authentication token"
+        help="Your BQE Core API authentication token. Get it from your BQE Core account settings.",
+        placeholder="Enter your BQE Core API token"
     )
     st.session_state.bqe_token = bqe_token
+    
+    # Show sample token format
+    with st.expander("ℹ️ API Token Help"):
+        st.markdown("""
+        Your BQE Core API token should look like:
+        ```
+        qiXSQ2uKoeF9b5M7bOKtRYNpBxBaVw1c955M0fFU_ldZ2cjovtMSlkbT28aJaBPl
+        ```
+        
+        To get your API token:
+        1. Log into your BQE Core account
+        2. Go to Account Settings → API Access
+        3. Generate or copy your API token
+        """)
     
     # Test Connection
     col1, col2 = st.columns(2)
@@ -1292,19 +1310,32 @@ with tab_bqe:
                     try:
                         headers = {
                             "Authorization": f"Bearer {bqe_token}",
-                            "Content-Type": "application/json"
+                            "Content-Type": "application/json",
+                            "Accept": "application/json"
                         }
-                        # Test with a simple endpoint (adjust based on BQE API)
-                        test_url = f"{bqe_base_url}/account"
+                        # Test with BQE Core employee endpoint to verify connection
+                        test_url = f"{bqe_base_url}/employee"
                         response = requests.get(test_url, headers=headers, timeout=10)
                         
                         if response.status_code == 200:
-                            st.success("✅ Successfully connected to BQE!")
-                            account_data = response.json()
-                            with st.expander("Account Details"):
-                                st.json(account_data)
+                            st.success("✅ Successfully connected to BQE Core!")
+                            try:
+                                data = response.json()
+                                with st.expander("Connection Details"):
+                                    if isinstance(data, list) and len(data) > 0:
+                                        st.write(f"Found {len(data)} employees")
+                                        st.json(data[0])  # Show first employee as sample
+                                    else:
+                                        st.json(data)
+                            except:
+                                st.info("Connected successfully")
+                        elif response.status_code == 401:
+                            st.error("❌ Authentication failed. Please check your API token.")
+                            st.info("Make sure you're using a valid BQE Core API token from your account settings.")
                         else:
-                            st.error(f"❌ Connection failed: {response.status_code} - {response.text}")
+                            st.error(f"❌ Connection failed: {response.status_code}")
+                            if response.text:
+                                st.error(f"Response: {response.text[:200]}")
                     except requests.exceptions.RequestException as e:
                         st.error(f"❌ Connection error: {str(e)}")
     
@@ -1327,7 +1358,7 @@ with tab_bqe:
                         
                         # Import Projects
                         try:
-                            projects_url = f"{bqe_base_url}/projects"
+                            projects_url = f"{bqe_base_url}/project"
                             response = requests.get(projects_url, headers=headers, timeout=10)
                             if response.status_code == 200:
                                 bqe_projects = response.json()
@@ -1338,18 +1369,20 @@ with tab_bqe:
                                 else:
                                     projects_list = []
                                 
-                                # Convert BQE projects to our format
+                                # Convert BQE Core projects to our format
                                 for bqe_project in projects_list:
-                                    project_name = bqe_project.get('name', f"BQE Project {bqe_project.get('id', 'Unknown')}")
+                                    # BQE Core uses different field names
+                                    project_name = bqe_project.get('projectName', bqe_project.get('name', f"BQE Project {bqe_project.get('projectID', bqe_project.get('id', 'Unknown'))}"))
                                     project_dir = get_project_dir(project_name)
                                     ensure_directory(project_dir)
                                     
-                                    # Store project metadata
+                                    # Store project metadata with BQE Core fields
                                     project_meta = {
-                                        "bqe_id": bqe_project.get('id'),
+                                        "bqe_id": bqe_project.get('projectID', bqe_project.get('id')),
                                         "name": project_name,
                                         "description": bqe_project.get('description', ''),
-                                        "status": bqe_project.get('status', 'active'),
+                                        "client": bqe_project.get('clientName', ''),
+                                        "status": bqe_project.get('projectStatus', bqe_project.get('status', 'active')),
                                         "imported_from_bqe": True,
                                         "imported_at": datetime.now().isoformat()
                                     }
@@ -1365,7 +1398,8 @@ with tab_bqe:
                         
                         # Import Contacts
                         try:
-                            contacts_url = f"{bqe_base_url}/contacts"
+                            # BQE Core uses 'contact' endpoint
+                            contacts_url = f"{bqe_base_url}/contact"
                             response = requests.get(contacts_url, headers=headers, timeout=10)
                             if response.status_code == 200:
                                 bqe_contacts = response.json()
@@ -1381,14 +1415,19 @@ with tab_bqe:
                                 existing_contacts = load_json_collection(project, "contacts")
                                 
                                 for bqe_contact in contacts_list:
+                                    # BQE Core uses different field names
+                                    full_name = f"{bqe_contact.get('firstName', '')} {bqe_contact.get('lastName', '')}".strip()
+                                    if not full_name:
+                                        full_name = bqe_contact.get('fullName', bqe_contact.get('name', 'Unknown'))
+                                    
                                     contact = {
                                         "id": uuid.uuid4().hex,
-                                        "bqe_id": bqe_contact.get('id'),
-                                        "name": bqe_contact.get('name', 'Unknown'),
+                                        "bqe_id": bqe_contact.get('contactID', bqe_contact.get('id')),
+                                        "name": full_name,
                                         "role": bqe_contact.get('title', ''),
-                                        "email": bqe_contact.get('email', ''),
-                                        "org": bqe_contact.get('company', ''),
-                                        "phone": bqe_contact.get('phone', ''),
+                                        "email": bqe_contact.get('email1', bqe_contact.get('email', '')),
+                                        "org": bqe_contact.get('companyName', bqe_contact.get('company', '')),
+                                        "phone": bqe_contact.get('mobilePhone', bqe_contact.get('phone1', bqe_contact.get('phone', ''))),
                                         "imported_from_bqe": True,
                                         "created": datetime.now().isoformat()
                                     }
