@@ -1391,7 +1391,7 @@ with tab_bqe:
         
         **Option 2: Manual Token Entry**
         If you have a BQE Core access token, you can enter it directly.
-        """)
+        """)  # Force redeployment
         
         # OAuth URL configuration
         with st.expander("🔧 Configure OAuth URLs", expanded=True):
