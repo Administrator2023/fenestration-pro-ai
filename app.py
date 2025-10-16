@@ -1284,7 +1284,15 @@ with tab_bqe:
                 
                 st.success("✅ Successfully authenticated with BQE Core!")
                 # Clear query params
-                st.experimental_set_query_params()
+                try:
+                    # Try new API first (Streamlit >= 1.30.0)
+                    st.query_params.clear()
+                except AttributeError:
+                    # Fall back to old API
+                    try:
+                        st.experimental_set_query_params()
+                    except Exception:
+                        pass
             except Exception as e:
                 st.error(f"OAuth authentication failed: {str(e)}")
     

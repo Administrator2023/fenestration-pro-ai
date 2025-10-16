@@ -113,18 +113,36 @@ def init_oauth_session():
 
 def handle_oauth_callback():
     """Handle OAuth callback with authorization code"""
-    query_params = st.experimental_get_query_params()
-    
-    if "code" in query_params and "state" in query_params:
-        code = query_params["code"][0]
-        state = query_params["state"][0]
+    try:
+        # Try new API first (Streamlit >= 1.30.0)
+        query_params = st.query_params
+        code = query_params.get("code")
+        state = query_params.get("state")
         
-        # Verify state matches
-        if state == st.session_state.get("bqe_oauth_state"):
-            return code
-        else:
-            st.error("OAuth state mismatch. Please try logging in again.")
-            return None
+        if code and state:
+            # Verify state matches
+            if state == st.session_state.get("bqe_oauth_state"):
+                return code
+            else:
+                st.error("OAuth state mismatch. Please try logging in again.")
+                return None
+    except AttributeError:
+        # Fall back to old API for older Streamlit versions
+        try:
+            query_params = st.experimental_get_query_params()
+            
+            if "code" in query_params and "state" in query_params:
+                code = query_params["code"][0]
+                state = query_params["state"][0]
+                
+                # Verify state matches
+                if state == st.session_state.get("bqe_oauth_state"):
+                    return code
+                else:
+                    st.error("OAuth state mismatch. Please try logging in again.")
+                    return None
+        except Exception:
+            pass
     
     return None
 
