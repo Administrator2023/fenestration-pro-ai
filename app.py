@@ -11,6 +11,20 @@ import pandas as pd
 import logging
 import requests
 
+# Import intelligent document parser
+try:
+    from intelligent_document_parser import (
+        IntelligentDocumentParser,
+        create_parser,
+        TechnicalEntityExtractor,
+        DOCUMENTAI_AVAILABLE,
+        PINECONE_AVAILABLE
+    )
+    INTELLIGENT_PARSER_AVAILABLE = True
+except ImportError as e:
+    INTELLIGENT_PARSER_AVAILABLE = False
+    logging.warning(f"Intelligent document parser not available: {e}")
+
 # Reduce noisy Chroma PostHog errors and disable telemetry via env
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 os.environ.setdefault("CHROMA_TELEMETRY_IMPL", "none")
@@ -331,8 +345,132 @@ def load_persistent_vectorstore(api_key: str):
         pass
     return None
 
+
+def process_pdfs_intelligent(uploaded_files, api_key):
+    """Process PDF files with intelligent document parser (Document AI + Pinecone)"""
+    with st.spinner("🧠 Processing PDFs with advanced intelligence..."):
+        try:
+            # Get credentials
+            docai_creds = st.session_state.get("docai_credentials", {})
+            pinecone_creds = st.session_state.get("pinecone_credentials", {})
+            use_docai = st.session_state.get("use_document_ai", False) and DOCUMENTAI_AVAILABLE
+            use_pinecone = st.session_state.get("use_pinecone", False) and PINECONE_AVAILABLE
+
+            # Create intelligent parser
+            parser = create_parser(
+                openai_api_key=api_key,
+                docai_credentials=docai_creds if use_docai else None,
+                pinecone_credentials=pinecone_creds if use_pinecone else None
+            )
+
+            # Process each file
+            temp_dir = tempfile.mkdtemp()
+            project = get_selected_project()
+            processed_docs = []
+            all_metadata = []
+
+            for uploaded_file in uploaded_files:
+                # Save temporarily
+                temp_path = os.path.join(temp_dir, uploaded_file.name)
+                with open(temp_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+
+                # Parse with intelligence
+                with st.spinner(f"📄 Analyzing {uploaded_file.name}..."):
+                    result = parser.index_document(temp_path, project)
+                    metadata = result['metadata']
+                    tables = result['tables']
+                    chunks_indexed = result['chunks_indexed']
+
+                    processed_docs.append({
+                        'name': uploaded_file.name,
+                        'chunks': chunks_indexed,
+                        'metadata': metadata,
+                        'tables': tables
+                    })
+                    all_metadata.append(metadata)
+
+                    # Display extracted intelligence
+                    st.success(f"✅ Processed {uploaded_file.name}")
+                    with st.expander(f"📊 Extracted Data from {uploaded_file.name}"):
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Type", metadata.get('document_type', 'Unknown'))
+                            st.metric("Pages", metadata.get('page_count', 0))
+                            st.metric("Confidence", f"{metadata.get('confidence_score', 0):.1%}")
+                        with col2:
+                            st.metric("Tables", len(tables))
+                            st.metric("Dimensions", len(metadata.get('extracted_dimensions', [])))
+                            st.metric("Materials", len(metadata.get('extracted_materials', [])))
+                        with col3:
+                            if metadata.get('drawing_number'):
+                                st.metric("Drawing #", metadata['drawing_number'])
+                            if metadata.get('revision'):
+                                st.metric("Revision", metadata['revision'])
+
+                        # Show dimensions
+                        if metadata.get('extracted_dimensions'):
+                            st.markdown("**📐 Dimensions Found:**")
+                            st.write(", ".join(metadata['extracted_dimensions'][:10]))
+
+                        # Show materials
+                        if metadata.get('extracted_materials'):
+                            st.markdown("**🔧 Materials Found:**")
+                            st.write(", ".join(metadata['extracted_materials']))
+
+                        # Show specs
+                        if metadata.get('extracted_specs'):
+                            st.markdown("**📋 Specifications:**")
+                            st.json(metadata['extracted_specs'])
+
+                        # Show tables
+                        if tables:
+                            st.markdown(f"**📊 Tables ({len(tables)}):**")
+                            for table in tables[:3]:  # Show first 3 tables
+                                st.markdown(f"*Table {table['table_index']} - {table['table_type']}*")
+                                try:
+                                    df = pd.DataFrame(table['rows'], columns=table['headers'])
+                                    st.dataframe(df, use_container_width=True)
+                                except:
+                                    st.write(f"Headers: {table['headers']}")
+
+            # Store in session
+            st.session_state.processed_docs = processed_docs
+            st.session_state.intelligent_metadata = all_metadata
+
+            # Log ingested documents
+            docs_log = load_json_collection(project, "ingested_docs")
+            for doc in processed_docs:
+                docs_log.append({
+                    "name": doc['name'],
+                    "chunks": doc['chunks'],
+                    "metadata": doc['metadata'],
+                    "ingested_at": datetime.now().isoformat(),
+                })
+            save_json_collection(project, "ingested_docs", docs_log)
+
+            # Cleanup
+            shutil.rmtree(temp_dir)
+
+            st.success(f"""
+            ✅ **Successfully processed {len(uploaded_files)} document(s) with advanced intelligence!**
+
+            The system has extracted dimensions, materials, calculations, and tables.
+            {'Documents are indexed in Pinecone for semantic search.' if use_pinecone else ''}
+            """)
+
+            st.info("🎯 Now ask questions about your shop drawings, specs, and calculations!")
+
+        except Exception as e:
+            st.error(f"Error in intelligent processing: {str(e)}")
+            import traceback
+            st.error(traceback.format_exc())
+            st.warning("Falling back to standard PDF processing...")
+            return process_pdfs(uploaded_files, api_key)
+
+
 def process_pdfs(uploaded_files, api_key):
-    """Process PDF files and extract content"""
+    """Process PDF files and extract content (Standard fallback method)"""
     with st.spinner("🧠 Processing PDFs and extracting content..."):
         try:
             # Create temporary directory
@@ -535,7 +673,95 @@ with st.sidebar:
         )
     else:
         st.success("✅ API Key loaded from secrets")
-    
+
+    st.markdown("---")
+
+    # Advanced Document Intelligence Configuration
+    with st.expander("🚀 Advanced Document Intelligence", expanded=False):
+        st.markdown("**Enterprise-grade parsing for shop drawings**")
+
+        # Document AI Configuration
+        st.markdown("##### Google Document AI")
+        use_document_ai = st.checkbox(
+            "Enable Document AI",
+            value=st.session_state.get("use_document_ai", False),
+            help="Advanced OCR and layout understanding for scanned drawings"
+        )
+        st.session_state.use_document_ai = use_document_ai
+
+        if use_document_ai:
+            docai_project_id = st.text_input(
+                "GCP Project ID",
+                value=st.secrets.get("DOCAI_PROJECT_ID", ""),
+                help="Your Google Cloud Project ID"
+            )
+            docai_location = st.text_input(
+                "Processor Location",
+                value=st.secrets.get("DOCAI_LOCATION", "us"),
+                help="e.g., 'us' or 'eu'"
+            )
+            docai_processor_id = st.text_input(
+                "Processor ID",
+                value=st.secrets.get("DOCAI_PROCESSOR_ID", ""),
+                help="Document AI Processor ID"
+            )
+            st.session_state.docai_credentials = {
+                'project_id': docai_project_id,
+                'location': docai_location,
+                'processor_id': docai_processor_id
+            }
+            if DOCUMENTAI_AVAILABLE and docai_project_id and docai_processor_id:
+                st.success("✅ Document AI configured")
+            elif use_document_ai and not DOCUMENTAI_AVAILABLE:
+                st.warning("⚠️ Install: pip install google-cloud-documentai")
+
+        # Pinecone Configuration
+        st.markdown("##### Pinecone Vector Database")
+        use_pinecone = st.checkbox(
+            "Enable Pinecone",
+            value=st.session_state.get("use_pinecone", False),
+            help="Production-scale semantic search with metadata filtering"
+        )
+        st.session_state.use_pinecone = use_pinecone
+
+        if use_pinecone:
+            pinecone_api_key = st.text_input(
+                "Pinecone API Key",
+                type="password",
+                value=st.secrets.get("PINECONE_API_KEY", ""),
+                help="Get from app.pinecone.io"
+            )
+            pinecone_environment = st.text_input(
+                "Pinecone Environment",
+                value=st.secrets.get("PINECONE_ENVIRONMENT", "us-east-1-aws"),
+                help="e.g., 'us-east-1-aws'"
+            )
+            pinecone_index = st.text_input(
+                "Index Name",
+                value=st.session_state.get("pinecone_index", "fenestration-docs"),
+                help="Index name for this project"
+            )
+            st.session_state.pinecone_credentials = {
+                'api_key': pinecone_api_key,
+                'environment': pinecone_environment,
+                'index_name': pinecone_index
+            }
+            if PINECONE_AVAILABLE and pinecone_api_key:
+                st.success("✅ Pinecone configured")
+            elif use_pinecone and not PINECONE_AVAILABLE:
+                st.warning("⚠️ Install: pip install pinecone-client")
+
+        # Intelligence features info
+        if use_document_ai or use_pinecone:
+            st.info("""
+            **Enhanced Capabilities:**
+            - 📐 Dimension extraction from drawings
+            - 🔢 Calculation understanding
+            - 📊 Advanced table parsing
+            - 🔍 OCR for scanned documents
+            - 🎯 Entity recognition (materials, specs)
+            """)
+
     st.markdown("---")
     # Admin authentication
     if "is_admin" not in st.session_state:
@@ -637,11 +863,21 @@ with st.sidebar:
         )
         if uploaded_files:
             st.success(f"📄 {len(uploaded_files)} file(s) uploaded!")
-            if st.button("🧠 Process & Learn from PDFs", type="primary"):
-                if RAG_AVAILABLE and api_key:
-                    process_pdfs(uploaded_files, api_key)
-                elif not api_key:
+
+            # Smart button text based on enabled features
+            use_intelligent = (st.session_state.get("use_document_ai", False) or
+                             st.session_state.get("use_pinecone", False)) and INTELLIGENT_PARSER_AVAILABLE
+            button_text = "🚀 Process with Advanced Intelligence" if use_intelligent else "🧠 Process & Learn from PDFs"
+
+            if st.button(button_text, type="primary"):
+                if not api_key:
                     st.error("Please add your OpenAI API key first!")
+                elif use_intelligent:
+                    # Use intelligent parser for enhanced understanding
+                    process_pdfs_intelligent(uploaded_files, api_key)
+                elif RAG_AVAILABLE:
+                    # Use standard RAG processing
+                    process_pdfs(uploaded_files, api_key)
                 else:
                     st.error("RAG capabilities not available. Please check dependencies.")
     
