@@ -37,6 +37,12 @@ from intelligent_document_parser import (
     DOCUMENTAI_AVAILABLE,
 )
 
+# Import continuous learning engine
+from continuous_learning_engine import (
+    ContinuousLearningEngine,
+    LearningStats,
+)
+
 # OpenAI for LLM
 from openai import OpenAI
 
@@ -295,6 +301,10 @@ class DomainQAEngine:
         # Initialize BM25 index
         self.bm25_index = BM25Index() if BM25_AVAILABLE else None
 
+        # Initialize continuous learning engine
+        learning_dir = f"./data/learning/{tenant_id}"
+        self.learning_engine = ContinuousLearningEngine(storage_dir=learning_dir)
+
         logger.info(f"Initialized DomainQAEngine for tenant: {tenant_id}")
 
     def get_namespace(self, project_id: str, discipline: Optional[str] = None) -> str:
@@ -332,6 +342,14 @@ class DomainQAEngine:
             try:
                 # Parse document with intelligent parser
                 metadata, tables, full_text = self.parser.parse_document(file_path, project_id)
+
+                # ★ CONTINUOUS LEARNING: Learn from this document
+                learning_results = self.learning_engine.learn_from_document(
+                    metadata,
+                    full_text,
+                    user_role="admin"  # Trainer upload
+                )
+                logger.info(f"Learning results: {learning_results}")
 
                 # Extract enhanced metadata
                 enhanced_meta = EnhancedMetadata(
@@ -575,6 +593,9 @@ class DomainQAEngine:
             confidence=confidence
         )
 
+        # ★ CONTINUOUS LEARNING: Learn from this query
+        self.learning_engine.learn_from_query(question, intent, all_results, confidence)
+
         logger.info(f"PM response generated: confidence={confidence:.2f}")
 
         return response
@@ -805,6 +826,26 @@ class DomainQAEngine:
         logger.info(f"Peer review complete: {status}, score={overall_score:.2f}")
 
         return result
+
+    def get_learning_stats(self) -> LearningStats:
+        """Get comprehensive learning statistics"""
+        return self.learning_engine.get_learning_stats()
+
+    def get_top_patterns(self, top_k: int = 10) -> List[Any]:
+        """Get most frequently observed patterns"""
+        return self.learning_engine.pattern_engine.get_top_patterns(top_k)
+
+    def get_knowledge_insights(self) -> Dict[str, Any]:
+        """Get insights from the knowledge graph"""
+        return {
+            "top_systems": [n.to_dict() for n in self.learning_engine.knowledge_graph.get_top_nodes("system", 5)],
+            "top_materials": [n.to_dict() for n in self.learning_engine.knowledge_graph.get_top_nodes("material", 5)],
+            "top_specs": [n.to_dict() for n in self.learning_engine.knowledge_graph.get_top_nodes("spec", 5)],
+        }
+
+    def export_learning_for_finetuning(self, output_dir: str):
+        """Export learning data for model fine-tuning"""
+        self.learning_engine.export_knowledge_base(output_dir)
 
 
 # Convenience functions
