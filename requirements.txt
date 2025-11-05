@@ -6,13 +6,8 @@ PyPDF2>=3.0.1,<4
 requests>=2.31.0,<3
 
 # RAG + persistence stack (kept optional by import guards in app.py)
-langchain>=0.2.11,<0.3
-langchain-openai>=0.1.8,<0.2
-langchain-community>=0.2.11,<0.3
-langchain-text-splitters>=0.2.2,<0.3
-# Prefer Chroma for persistent vector DB; FAISS as lightweight fallback
-chromadb>=0.5.0,<0.6
-faiss-cpu>=1.7.4,<2
+# NOTE: langchain packages REMOVED - they pull in pinecone-client which conflicts with pinecone
+# The current app.py doesn't use langchain (only used in old deprecated files)
 pandas>=2.2.0,<3
 
 # Enterprise Document Intelligence (Primary - High Accuracy)
