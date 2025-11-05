@@ -64,37 +64,156 @@ RAG_CONFIG = RAGConfig()
 # App configuration
 APP_CONFIG = AppConfig()
 
-# Fenestration-specific prompts
-FENESTRATION_SYSTEM_PROMPT = """
-You are an expert in fenestration, windows, doors, glazing systems, and building envelope technology. 
-You have deep knowledge of:
+# ============================================================================
+# MASTER SYSTEM PROMPT - Domain QA Assistant for Engineering Shop Drawings
+# ============================================================================
 
-- Window and door manufacturing processes
-- Glass types and performance characteristics
-- Energy efficiency standards (ENERGY STAR, NFRC ratings)
-- Building codes and regulations
-- Installation best practices
-- Thermal performance and U-values
-- Solar heat gain coefficients (SHGC)
-- Air leakage and water penetration testing
-- Structural glazing systems
-- Curtain wall design and installation
-- Hardware and operating systems
-- Weatherstripping and sealing technologies
+MASTER_SYSTEM_PROMPT = """You are the Domain QA Assistant for engineering shop drawings and calculations.
 
-When answering questions:
-1. Provide technical accuracy with specific standards and codes
-2. Include relevant performance metrics when applicable
-3. Consider both residential and commercial applications
-4. Reference industry best practices
-5. Explain complex concepts clearly for different expertise levels
+PRIMARY GOALS:
+1. Stay strictly within this tenant's domain documents
+2. Answer with verifiable citations (doc name + page/section)
+3. When confidence is low, ask for the missing artifact or route to upload
+
+ROLES:
+- Admin mode: bulk-ingest and index PDFs/XLSX/DWG-derived PDFs
+- PM mode: answer scoped questions using only indexed content
+
+GROUNDING RULES:
+- Use retrieval → re-rank → synthesize
+- Cite at least two sources when possible: [Doc, p#]
+- If evidence is insufficient: say "insufficient evidence in library" and request the exact file or spec section
+- Out-of-domain or speculative questions: decline and restate accepted scope
+
+DATA MODEL:
+For each file, create metadata:
+{tenant_id, project_id, discipline, system_id, doc_type, rev, date, page, section, tags[]}
+Chunking: view/section/table-level, not fixed tokens. Keep references to page bbox.
+
+INGESTION (Admin Mode):
+1. Run Document AI to extract: text, tables, headings, page coords
+2. Normalize units and capture revision/date
+3. Embed chunks; upsert to Pinecone under namespace = {tenant_id}:{project_id or "global"}; store full metadata
+4. Build a "high-recall" BM25 index for headings/callouts
+5. Write a coverage report: counts by doc_type, missing revs, OCR confidence < 0.9
+
+ANSWERING (PM Mode):
+1. Classify intent: spec lookup / detail lookup / calculation policy / BOM / anchor spacing / glass sizing
+2. Retrieve (BM25 top 30) → re-rank with reranker top 8 → apply discipline/system_id filter
+3. Synthesize an answer only from the top chunks
+4. Output structured response with citations
+5. If confidence < 0.6: ask for the missing drawing or calculation by name
+
+GUARDRAILS:
+- No hallucination. No external web. No cross-tenant leakage.
+- Prefer newest rev by date; if conflict, present both
+- Unit safety: do not mix units; echo units from source
+- If multiple standards disagree, present a side-by-side delta
+
+STYLE:
+- Short, declarative
+- One paragraph answer, then citations line
+- Tables only when numeric clarity helps
+
+DOMAIN EXPERTISE (Fenestration-specific):
+- Window and door systems: casement, double hung, sliding, curtain wall, storefront
+- Glass specifications: Low-E, tempered, laminated, insulated glazing units (IGU)
+- Performance metrics: U-factor, SHGC, VT, STC, DP (design pressure)
+- Materials: aluminum, vinyl, fiberglass, wood, steel
+- Standards: AAMA, ASTM, NFRC, ENERGY STAR
+- Anchor spacing, sill flashing, head details, jamb conditions
+- Wind load calculations, structural glazing, thermal breaks
 """
 
-DOCUMENT_ANALYSIS_PROMPT = """
-Based on the provided document context about fenestration and building envelope systems, 
+# Admin Ingestion Prompt Template
+ADMIN_INGESTION_PROMPT = """Admin mode. Tenant: {tenant_id}. Project: {project_id}.
+
+Ingest these files with doc_type labels: {file_list}.
+
+Extract text/tables/headings with page coords via Document AI. Normalize units.
+Chunk by logical sections (view/detail/table).
+
+Upsert to Pinecone namespace {tenant_id}:{project_id} with metadata:
+- discipline: {discipline}
+- system_id: {system_id}
+- doc_type: {doc_type}
+- rev: {rev}
+- date: {date}
+- page: {page}
+- section: {section}
+- tags: {tags}
+
+Build BM25 side index for hybrid search.
+
+Return a coverage report with:
+- Counts by doc_type
+- Missing revisions
+- Pages with OCR confidence < 0.9
+- Extracted entities summary (dimensions, materials, specs)
+"""
+
+# PM Query Prompt Template
+PM_QUERY_PROMPT = """PM mode. Tenant: {tenant_id}. Project: {project_id}.
+Discipline: {discipline}. System: {system_id}.
+
+Question: {question}
+
+Retrieve strictly from the namespace {tenant_id}:{project_id}.
+Prefer latest rev. Apply discipline/system_id filters.
+
+If evidence < 0.6 confidence, ask for the exact drawing/spec by name.
+
+Output structured JSON:
+{{
+  "answer": "<crisp text>",
+  "citations": [{{"doc":"<name>","page":1,"section":"..."}}],
+  "assumptions": ["<if any>"],
+  "followups": ["<next-best question>"],
+  "confidence": 0.0-1.0
+}}
+"""
+
+# Peer Review Prompt Template
+PEER_REVIEW_PROMPT = """Peer Review mode. Tenant: {tenant_id}. Project: {project_id}.
+
+Review the uploaded document: {filename}
+
+Compare against indexed standards and specifications in namespace {tenant_id}:global.
+
+Check for:
+1. **Completeness**: Missing sections, tables, or required details
+2. **Accuracy**: Dimensional conflicts, spec mismatches, calculation errors
+3. **Compliance**: Code violations, standard deviations, material incompatibilities
+4. **Consistency**: Revision conflicts, drawing note contradictions
+5. **Clarity**: Ambiguous callouts, incomplete references
+
+Output structured review:
+{{
+  "status": "approved|needs_revision|rejected",
+  "overall_score": 0.0-1.0,
+  "issues": [
+    {{
+      "severity": "critical|major|minor",
+      "category": "completeness|accuracy|compliance|consistency|clarity",
+      "page": 1,
+      "section": "...",
+      "description": "...",
+      "reference_doc": "...",
+      "recommendation": "..."
+    }}
+  ],
+  "strengths": ["..."],
+  "summary": "..."
+}}
+"""
+
+# Legacy prompts (kept for backward compatibility)
+FENESTRATION_SYSTEM_PROMPT = MASTER_SYSTEM_PROMPT
+
+DOCUMENT_ANALYSIS_PROMPT = """Based on the provided document context about fenestration and building envelope systems,
 provide a comprehensive answer that includes:
 
-1. Direct information from the documents
+1. Direct information from the documents with citations [Doc, p#]
 2. Technical specifications and standards mentioned
 3. Performance characteristics and ratings
 4. Installation or application guidelines
@@ -124,4 +243,170 @@ ANALYTICS_CONFIG = {
     "track_user_queries": True,
     "track_document_usage": True,
     "export_formats": ["json", "csv", "xlsx"]
+}
+
+# ============================================================================
+# METADATA SCHEMA & NAMESPACING
+# ============================================================================
+
+# Document metadata schema
+METADATA_SCHEMA = {
+    "tenant_id": str,  # Organization/company identifier
+    "project_id": str,  # Project identifier or "global" for standards
+    "discipline": str,  # architectural, structural, mechanical, electrical, fenestration
+    "system_id": str,  # Specific system (e.g., "CW-2500", "MG-1400")
+    "doc_type": str,  # shop_drawing, calculation, specification, submittal, approval, bom
+    "rev": str,  # Revision number/letter
+    "date": str,  # Document date (ISO format)
+    "page": int,  # Page number
+    "section": str,  # Section/detail identifier (e.g., "Detail 3/A5.1")
+    "tags": list,  # Additional tags for filtering
+    "confidence": float,  # OCR/extraction confidence (0.0-1.0)
+    "bbox": dict,  # Bounding box coordinates {x, y, width, height}
+}
+
+# Document types
+DOC_TYPES = [
+    "shop_drawing",
+    "calculation_sheet",
+    "specification",
+    "submittal",
+    "approval",
+    "bom",  # Bill of materials
+    "schedule",
+    "detail",
+    "elevation",
+    "plan",
+    "section",
+    "standard",  # Industry standards
+    "testing_report",
+]
+
+# Disciplines
+DISCIPLINES = [
+    "fenestration",
+    "architectural",
+    "structural",
+    "mechanical",
+    "electrical",
+    "civil",
+    "glazing",
+    "envelope",
+]
+
+# Query intent classification
+QUERY_INTENTS = [
+    "spec_lookup",  # "What is the U-factor?"
+    "detail_lookup",  # "Show me head detail"
+    "calculation_policy",  # "How to calculate wind load?"
+    "bom_query",  # "List all materials"
+    "anchor_spacing",  # "What's the anchor spacing?"
+    "glass_sizing",  # "Max IGU size?"
+    "dimension_query",  # "What are the dimensions?"
+    "material_query",  # "What material is specified?"
+    "compliance_check",  # "Does this meet AAMA standards?"
+    "comparison",  # "Compare rev A vs rev B"
+]
+
+# Confidence thresholds
+CONFIDENCE_THRESHOLDS = {
+    "high": 0.8,  # High confidence, can answer directly
+    "medium": 0.6,  # Medium confidence, provide answer with caveats
+    "low": 0.4,  # Low confidence, ask for more context
+    "insufficient": 0.4,  # Below this, request missing artifacts
+}
+
+# Re-ranking configuration
+RERANK_CONFIG = {
+    "bm25_top_k": 30,  # Initial BM25 retrieval
+    "rerank_top_k": 8,  # After re-ranking
+    "semantic_weight": 0.7,  # Semantic search weight
+    "bm25_weight": 0.3,  # BM25 weight
+}
+
+# Namespace patterns
+NAMESPACE_PATTERNS = {
+    "global": "{tenant_id}:global",  # Company-wide standards
+    "project": "{tenant_id}:{project_id}",  # Project-specific
+    "discipline": "{tenant_id}:{project_id}:{discipline}",  # Discipline-scoped
+}
+
+# Unit normalization mappings
+UNIT_MAPPINGS = {
+    "length": {
+        "ft": "feet",
+        "feet": "feet",
+        "foot": "feet",
+        "'": "feet",
+        "in": "inches",
+        "inch": "inches",
+        "inches": "inches",
+        '"': "inches",
+        "mm": "millimeters",
+        "millimeter": "millimeters",
+        "cm": "centimeters",
+        "m": "meters",
+        "meter": "meters",
+    },
+    "pressure": {
+        "psf": "pounds_per_square_foot",
+        "pa": "pascals",
+        "kpa": "kilopascals",
+        "psi": "pounds_per_square_inch",
+    },
+    "thermal": {
+        "u-factor": "u_factor",
+        "u-value": "u_factor",
+        "r-value": "r_value",
+    }
+}
+
+# Operational modes
+OPERATIONAL_MODES = {
+    "admin": "Admin mode - Document ingestion and indexing",
+    "pm": "PM mode - Query answering from indexed documents",
+    "peer_review": "Peer Review mode - Document validation against standards",
+}
+
+# Few-shot examples for intent classification
+FEW_SHOT_EXAMPLES = [
+    {
+        "query": "What is the allowed anchor spacing for MG-2500T on concrete?",
+        "intent": "anchor_spacing",
+        "answer": "Max 6 in O.C. at jambs and head; sill at 8 in O.C. unless otherwise noted.",
+        "citations": ["MG-2500T Anchorage, p7 §Concrete"],
+    },
+    {
+        "query": "Can I use 8-16-8 IGU for 3.2 m height?",
+        "intent": "glass_sizing",
+        "answer": "Not supported at 3.2 m; spec limits IGU thickness to 6-12-6 for heights ≤ 3.0 m. Use thicker glazing or reduce height.",
+        "citations": ["Glazing Schedule, p3 table T-1"],
+    },
+    {
+        "query": "What's the wind DP on FL14677_R4?",
+        "intent": "spec_lookup",
+        "answer": "±70 PSF per approval sheet.",
+        "citations": ["FL14677_R4 Cover, p1"],
+    },
+]
+
+# Coverage report template
+COVERAGE_REPORT_TEMPLATE = {
+    "tenant_id": None,
+    "project_id": None,
+    "ingestion_timestamp": None,
+    "files_processed": 0,
+    "total_pages": 0,
+    "total_chunks": 0,
+    "doc_type_counts": {},
+    "discipline_counts": {},
+    "missing_metadata": [],
+    "low_confidence_pages": [],  # OCR confidence < 0.9
+    "extracted_entities": {
+        "dimensions": [],
+        "materials": [],
+        "specs": {},
+        "systems": [],
+    },
+    "warnings": [],
 }
