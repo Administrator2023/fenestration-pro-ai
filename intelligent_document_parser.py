@@ -35,7 +35,7 @@ try:
     PINECONE_AVAILABLE = True
 except ImportError:
     PINECONE_AVAILABLE = False
-    logging.warning("Pinecone not available - install pinecone-client")
+    logging.warning("Pinecone not available - install pinecone")
 
 # Fallback PDF parsing
 try:

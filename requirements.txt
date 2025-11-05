@@ -17,7 +17,7 @@ pandas>=2.2.0,<3
 
 # Enterprise Document Intelligence (Primary - High Accuracy)
 google-cloud-documentai>=2.20.0  # Google Document AI for advanced OCR and layout understanding
-pinecone>=3.0.0  # Pinecone vector database for production-scale semantic search
+pinecone==5.0.0  # Pinecone vector database (NOTE: renamed from pinecone-client)
 google-cloud-storage>=2.10.0  # GCS for Document AI file handling
 
 # Advanced PDF parsing and document intelligence (Fallback)
