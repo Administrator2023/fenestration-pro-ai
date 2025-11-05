@@ -1,4 +1,5 @@
 # Minimal dependencies for the Streamlit app to run
+# Updated 2025-11-05: Fixed pinecone package name (cache bust)
 streamlit==1.50.0
 openai>=1.30.0,<2
 PyPDF2>=3.0.1,<4
