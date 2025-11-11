@@ -35,7 +35,7 @@ try:
     PINECONE_AVAILABLE = True
 except ImportError:
     PINECONE_AVAILABLE = False
-    logging.warning("Pinecone not available - install pinecone-client")
+    logging.warning("Pinecone not available - install pinecone")
 
 # Fallback PDF parsing
 try:
@@ -391,7 +391,7 @@ class PineconeVectorStore:
             index_name: Name of the index to use
         """
         if not PINECONE_AVAILABLE:
-            raise ImportError("Pinecone not available. Install: pip install pinecone-client")
+            raise ImportError("Pinecone not available. Install: pip install pinecone")
 
         self.api_key = api_key
         self.environment = environment

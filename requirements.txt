@@ -16,7 +16,11 @@ pandas>=2.2.0,<3
 
 # Enterprise Document Intelligence (Primary - High Accuracy)
 google-cloud-documentai>=2.20.0  # Google Document AI for advanced OCR and layout understanding
-pinecone-client>=3.0.0  # Pinecone vector database for production-scale semantic search
+# NOTE: Pinecone package was renamed from 'pinecone-client' to 'pinecone'
+# If you have 'pinecone-client' installed, you MUST uninstall it first:
+#   pip uninstall pinecone-client
+#   pip install pinecone>=3.0.0
+pinecone>=3.0.0  # Pinecone vector database for production-scale semantic search
 google-cloud-storage>=2.10.0  # GCS for Document AI file handling
 
 # Advanced PDF parsing and document intelligence (Fallback)
